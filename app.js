@@ -555,9 +555,21 @@ function setupTabs(subdivisionTable) {
   });
 }
 
+async function fetchJsonGz(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${url}: HTTP ${res.status}`);
+  }
+  if (typeof DecompressionStream === "undefined") {
+    throw new Error("This browser doesn't support DecompressionStream (needed to read the gzipped data file) — try a recent Chrome, Edge, Firefox, or Safari.");
+  }
+  const decompressed = res.body.pipeThrough(new DecompressionStream("gzip"));
+  const text = await new Response(decompressed).text();
+  return JSON.parse(text);
+}
+
 async function main() {
-  const res = await fetch("data/properties.json", { cache: "no-store" });
-  const payload = await res.json();
+  const payload = await fetchJsonGz("data/properties.json.gz");
 
   document.getElementById("site-title").textContent = payload.title;
   const generatedText = payload.data_generated_at
