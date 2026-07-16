@@ -1,0 +1,323 @@
+:root {
+  --border: #d9dde3;
+  --text-muted: #5a6472;
+  --primary: #1f6feb;
+  --primary-hover: #185ac2;
+  font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f6f8;
+  color: #1a1f27;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 24px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header__title h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.app-header__meta {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.app-header__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn--primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.btn--primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn--secondary:hover,
+.btn--ghost:hover {
+  background: #f0f1f3;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.toolbar__search {
+  flex: 1 1 220px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.toolbar__filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar__count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding-top: 8px;
+}
+
+/* Multi-select dropdown filter */
+.multiselect {
+  position: relative;
+}
+
+.multiselect__toggle {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.multiselect__toggle.is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.multiselect__panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: 220px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+}
+
+.multiselect__panel.is-open {
+  display: block;
+}
+
+.multiselect__search {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.multiselect__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+.multiselect__actions button {
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.multiselect__list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.multiselect__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.multiselect__item:hover {
+  background: #f5f6f8;
+}
+
+.multiselect__item input {
+  margin: 0;
+}
+
+/* Plain text filters */
+.textfilter__input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  width: 130px;
+}
+
+#property-table {
+  margin: 16px 24px;
+}
+
+/* vs suburb median: above median (pricier) vs below median (cheaper) */
+.pct-above {
+  color: #b3261e;
+}
+
+.pct-below {
+  color: #1e8e3e;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs__btn {
+  border: none;
+  background: none;
+  padding: 12px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tabs__btn:hover {
+  color: #1a1f27;
+}
+
+.tabs__btn.is-active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.is-active {
+  display: block;
+}
+
+.toolbar--wrap {
+  align-items: center;
+}
+
+.toolbar__params {
+  display: flex;
+  gap: 8px;
+}
+
+.subdivision-note {
+  margin: 12px 24px;
+  padding: 10px 14px;
+  background: #eef4ff;
+  border: 1px solid #cfe0fb;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #1a1f27;
+}
+
+.subdivision-note code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+#subdivision-table {
+  margin: 16px 24px;
+}
+
+/* Range (min/max) filter */
+.rangefilter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rangefilter__label {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.rangefilter__input {
+  width: 90px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+/* Live subdivision economics inputs */
+.paramfilter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.paramfilter__input {
+  width: 90px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* Estimated subdivision profit */
+.profit-positive {
+  color: #1e8e3e;
+  font-weight: 600;
+}
+
+.profit-negative {
+  color: #b3261e;
+}

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Australia Property Explorer</title>
+
+  <link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header__title">
+      <h1 id="site-title">Property Explorer</h1>
+      <p id="site-meta" class="app-header__meta"></p>
+    </div>
+    <div class="app-header__actions">
+      <button id="download-csv" class="btn btn--secondary">Download CSV</button>
+      <button id="download-xlsx" class="btn btn--primary">Download Excel</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tabs__btn is-active" data-tab="datatable">Data Table</button>
+    <button class="tabs__btn" data-tab="subdivision">Subdivision</button>
+  </nav>
+
+  <section id="tab-datatable" class="tab-panel is-active">
+    <section class="toolbar">
+      <input id="search-box" type="text" placeholder="Search address..." class="toolbar__search" />
+      <div id="filters" class="toolbar__filters"></div>
+      <button id="clear-filters" class="btn btn--ghost">Clear filters</button>
+      <span id="row-count" class="toolbar__count"></span>
+    </section>
+
+    <div id="property-table"></div>
+  </section>
+
+  <section id="tab-subdivision" class="tab-panel">
+    <section class="toolbar toolbar--wrap">
+      <div id="subdivision-filters" class="toolbar__filters"></div>
+      <div id="subdivision-params" class="toolbar__params"></div>
+      <button id="subdivision-clear-filters" class="btn btn--ghost">Clear filters</button>
+      <span id="subdivision-row-count" class="toolbar__count"></span>
+    </section>
+    <p class="subdivision-note">
+      Estimated revenue per lot is derived from actual vacant-land sale prices in the same
+      suburb and size range — not a fixed assumption. Subdivision cost and stamp duty buffer
+      are yours to set above; estimated profit updates live. See
+      <code>references/subdivision/context.md</code> for the full methodology.
+    </p>
+
+    <div id="subdivision-table"></div>
+  </section>
+
+  <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
