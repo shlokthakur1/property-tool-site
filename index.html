@@ -44,14 +44,27 @@
       <span id="subdivision-row-count" class="toolbar__count"></span>
     </section>
     <p class="subdivision-note">
-      Estimated revenue per lot is derived from actual vacant-land sale prices in the same
-      suburb and size range — not a fixed assumption. Subdivision cost and stamp duty buffer
-      are yours to set above; estimated profit updates live. See
-      <code>references/subdivision/context.md</code> for the full methodology.
+      Suburbs with at least one currently-For-Sale block worth subdividing at a profit,
+      ranked by a profitability index (best opportunity's profit × confidence). Resale value
+      per new lot comes from actual recent vacant-land sales near the resulting lot size — not
+      a fixed assumption. Subdivision cost and stamp duty buffer are yours to set above;
+      profit and rankings update live. Click a suburb to see its listings, and click a listing
+      to see the comparables used. See <code>references/subdivision/context.md</code> for the
+      full methodology.
     </p>
 
     <div id="subdivision-table"></div>
   </section>
+
+  <div id="subdivision-modal" class="modal-overlay" hidden>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="subdivision-modal-title"></h3>
+        <button id="subdivision-modal-close" class="btn btn--ghost" aria-label="Close">✕</button>
+      </div>
+      <div id="subdivision-modal-body" class="modal-body"></div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>

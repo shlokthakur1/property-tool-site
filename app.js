@@ -332,17 +332,15 @@ function updateRowCount(table, countEl, noun) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Subdivision tab — same data source, but filtered to blocks big enough to
-// split (see build_site.py add_subdivision_fields), plus a live profit
-// estimate: revenue comes from real vacant-land comps baked into the data at
-// build time, cost/stamp-duty are whatever the user dials in here, so the
-// estimate recomputes instantly without rebuilding the site.
+// Subdivision tab — a suburb-level opportunity finder. Each listing in
+// payload.subdivision.listings is a currently-For-Sale block big enough to
+// subdivide, with a comp-backed resale estimate already computed at build
+// time (see build_site.py build_subdivision_listings). Cost-per-lot and
+// stamp duty are live-adjustable here, so profit — and therefore which
+// suburbs even qualify — is computed entirely client-side and recomputed on
+// every parameter/filter change.
 // ─────────────────────────────────────────────────────────────────────────────
-const SUBDIVISION_MULTI_FIELDS = [
-  { field: "status", label: "Status" },
-  { field: "state", label: "State" },
-];
-
+const SUBDIVISION_MULTI_FIELDS = [{ field: "state", label: "State" }];
 const SUBDIVISION_RANGE_FIELDS = [
   { field: "land_size_m2", label: "Land (m²)" },
   { field: "price", label: "Price" },
@@ -354,107 +352,208 @@ SUBDIVISION_RANGE_FIELDS.forEach((f) => (subdivisionFilterState.range[f.field] =
 
 const subdivisionParams = { costPerLot: 0, stampDutyBufferPct: 0 };
 
-function estimateProfit(row) {
-  const lots = row.subdivision_lots_possible;
-  const totalRevenue = row.subdivision_est_total_revenue;
-  if (lots == null || totalRevenue == null || row.price == null) return null;
-  const subdivisionCost = subdivisionParams.costPerLot * lots;
-  const stampDuty = row.price * (subdivisionParams.stampDutyBufferPct / 100);
-  const totalCost = row.price + subdivisionCost + stampDuty;
-  return totalRevenue - totalCost;
+function computeProfit(listing, params) {
+  const cost = listing.price + params.costPerLot * listing.lots_possible
+    + listing.price * (params.stampDutyBufferPct / 100);
+  return listing.est_total_revenue - cost;
 }
 
-function subdivisionRowMatchesFilters(row) {
-  for (const { field } of SUBDIVISION_MULTI_FIELDS) {
-    const selected = subdivisionFilterState.multi[field];
-    if (selected.size > 0 && !selected.has(String(row[field] ?? ""))) return false;
-  }
+function confidenceLabel(confidence) {
+  if (confidence >= 0.9) return "High";
+  if (confidence >= 0.5) return "Medium";
+  return "Low";
+}
+
+function listingMatchesFilters(listing) {
+  const selectedStates = subdivisionFilterState.multi.state;
+  if (selectedStates.size > 0 && !selectedStates.has(String(listing.state ?? ""))) return false;
   for (const { field } of SUBDIVISION_RANGE_FIELDS) {
     const { min, max } = subdivisionFilterState.range[field];
-    const value = row[field];
+    const value = listing[field];
     if (min != null && (value == null || value < min)) return false;
     if (max != null && (value == null || value > max)) return false;
   }
   return true;
 }
 
-function extendSubdivisionColumn(col) {
-  const numberFields = [
-    "subdivision_min_lot_m2",
-    "subdivision_lots_possible",
-    "subdivision_lot_size_m2",
-    "subdivision_comp_count",
+// Groups profitable (after live params), filter-matching listings by
+// suburb+state. A suburb's displayed profit/confidence are its single best
+// opportunity's own numbers — that's the one an investor would actually
+// pursue — with the rest of the suburb's opportunities available on drill-in.
+function buildSuburbGroups(listings, params) {
+  const bySuburb = new Map();
+  for (const listing of listings) {
+    if (!listingMatchesFilters(listing)) continue;
+    const profit = computeProfit(listing, params);
+    if (profit <= 0) continue;
+    const key = `${listing.suburb}||${listing.state}`;
+    const scored = { ...listing, profit, index: profit * listing.confidence };
+    if (!bySuburb.has(key)) bySuburb.set(key, []);
+    bySuburb.get(key).push(scored);
+  }
+
+  const groups = [];
+  for (const items of bySuburb.values()) {
+    items.sort((a, b) => b.index - a.index);
+    const best = items[0];
+    groups.push({
+      suburb: best.suburb,
+      state: best.state,
+      bestProfit: best.profit,
+      bestConfidence: best.confidence,
+      index: best.index,
+      opportunityCount: items.length,
+      listings: items,
+    });
+  }
+  groups.sort((a, b) => b.index - a.index);
+  return groups;
+}
+
+function formatMoney(value) {
+  return value == null ? "—" : `$${Math.round(value).toLocaleString()}`;
+}
+
+function buildSuburbColumns() {
+  return [
+    { field: "suburb", title: "Suburb", headerFilter: false },
+    { field: "state", title: "State", headerFilter: false, width: 80 },
+    {
+      field: "opportunityCount", title: "Opportunities", sorter: "number", width: 130,
+      formatter: (cell) => cell.getValue().toLocaleString(),
+    },
+    {
+      field: "bestProfit", title: "Best Est. Profit", sorter: "number",
+      formatter: (cell) => {
+        const value = cell.getValue();
+        return `<span class="profit-positive">+${formatMoney(value)}</span>`;
+      },
+    },
+    {
+      field: "bestConfidence", title: "Confidence", sorter: "number", width: 110,
+      formatter: (cell) => {
+        const value = cell.getValue();
+        const label = confidenceLabel(value);
+        return `<span class="confidence-badge confidence-${label.toLowerCase()}">${label}</span>`;
+      },
+    },
+    // Not shown directly (profit + confidence already tell the story), just
+    // the default sort target: best profit weighted by how much evidence
+    // backs its resale estimate, so a shakier huge number doesn't outrank a
+    // smaller, well-supported one.
+    { field: "index", title: "Index", visible: false, sorter: "number" },
   ];
-  if (numberFields.includes(col.field)) {
-    return { ...col, sorter: "number" };
-  }
-  if (col.field === "subdivision_comp_price_per_m2") {
-    return {
-      ...col,
-      sorter: "number",
-      formatter: (cell) => {
-        const value = cell.getValue();
-        return value == null ? "" : `$${Math.round(value).toLocaleString()}/m²`;
-      },
-    };
-  }
-  if (col.field === "subdivision_est_revenue_per_lot" || col.field === "subdivision_est_total_revenue") {
-    return {
-      ...col,
-      sorter: "number",
-      formatter: (cell) => {
-        const value = cell.getValue();
-        return value == null ? "" : `$${Math.round(value).toLocaleString()}`;
-      },
-    };
-  }
-  return col;
 }
 
-function buildSubdivisionColumns(columnsCfg) {
-  const columns = buildColumns(columnsCfg).map(extendSubdivisionColumn);
-  columns.push({
-    field: "_estimated_profit",
-    title: "Est. Profit",
-    sorter: (a, b, aRow, bRow) => {
-      const av = estimateProfit(aRow.getData());
-      const bv = estimateProfit(bRow.getData());
-      if (av == null && bv == null) return 0;
-      if (av == null) return -1;
-      if (bv == null) return 1;
-      return av - bv;
-    },
-    formatter: (cell) => {
-      const value = estimateProfit(cell.getRow().getData());
-      if (value == null) return "—";
-      const cls = value > 0 ? "profit-positive" : "profit-negative";
-      const sign = value > 0 ? "+" : "";
-      return `<span class="${cls}">${sign}$${Math.round(value).toLocaleString()}</span>`;
-    },
+// ─────────────────────────────────────────────────────────────────────────────
+// Drill-down modal: a suburb's listings, each expandable in place to show the
+// full profit calculation and the actual comparable sales used.
+// ─────────────────────────────────────────────────────────────────────────────
+function renderCompsTable(comps) {
+  if (!comps || comps.length === 0) return "<p class=\"modal-empty\">No comp details available.</p>";
+  const rows = comps.map((c) => `
+    <tr>
+      <td>${c.url ? `<a href="${c.url}" target="_blank" rel="noopener">${c.address ?? "—"}</a>` : (c.address ?? "—")}</td>
+      <td>${c.land_size_m2 != null ? `${Math.round(c.land_size_m2).toLocaleString()} m²` : "—"}</td>
+      <td>${formatMoney(c.price)}</td>
+      <td>${c.sold_date ?? "—"}</td>
+    </tr>
+  `).join("");
+  return `
+    <table class="comps-table">
+      <thead><tr><th>Address</th><th>Land</th><th>Sold price</th><th>Sold date</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderListingDetail(listing, params) {
+  const subdivisionCost = params.costPerLot * listing.lots_possible;
+  const stampDuty = listing.price * (params.stampDutyBufferPct / 100);
+  const totalCost = listing.price + subdivisionCost + stampDuty;
+  return `
+    <div class="listing-detail">
+      <div class="listing-detail__calc">
+        <div><span>Purchase price</span><span>${formatMoney(listing.price)}</span></div>
+        <div><span>Subdivision cost (${listing.lots_possible} × ${formatMoney(params.costPerLot)})</span><span>${formatMoney(subdivisionCost)}</span></div>
+        <div><span>Stamp duty buffer (${params.stampDutyBufferPct}%)</span><span>${formatMoney(stampDuty)}</span></div>
+        <div class="listing-detail__total"><span>Total cost</span><span>${formatMoney(totalCost)}</span></div>
+        <div><span>Comp median price × ${listing.lots_possible} lots</span><span>${formatMoney(listing.est_total_revenue)}</span></div>
+        <div class="listing-detail__total"><span>Estimated profit</span><span class="profit-positive">+${formatMoney(listing.profit)}</span></div>
+      </div>
+      <h4>Comparables used (${listing.comp_count}, ${confidenceLabel(listing.confidence)} confidence)</h4>
+      <p class="modal-note">Sold vacant land in ${listing.suburb}, sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot
+        — median ${formatMoney(listing.comp_median_price)}, range ${formatMoney(listing.comp_min_price)}–${formatMoney(listing.comp_max_price)}.</p>
+      ${renderCompsTable(listing.comps)}
+    </div>
+  `;
+}
+
+function openSuburbModal(group, params) {
+  const overlay = document.getElementById("subdivision-modal");
+  const title = document.getElementById("subdivision-modal-title");
+  const body = document.getElementById("subdivision-modal-body");
+
+  title.textContent = `${group.suburb}, ${group.state} — ${group.opportunityCount} opportunit${group.opportunityCount === 1 ? "y" : "ies"}`;
+  body.innerHTML = "";
+
+  group.listings.forEach((listing, i) => {
+    const card = document.createElement("div");
+    card.className = "listing-card";
+    card.innerHTML = `
+      <div class="listing-card__summary">
+        <div class="listing-card__main">
+          <a href="${listing.url}" target="_blank" rel="noopener">${listing.address}</a>
+          <span class="listing-card__meta">${formatMoney(listing.price)} · ${Math.round(listing.land_size_m2).toLocaleString()} m²
+            · ${listing.lots_possible} lots of ~${Math.round(listing.resulting_lot_m2)} m²${listing.zone ? ` · ${listing.zone}` : ""}</span>
+        </div>
+        <div class="listing-card__profit">
+          <span class="profit-positive">+${formatMoney(listing.profit)}</span>
+          <span class="confidence-badge confidence-${confidenceLabel(listing.confidence).toLowerCase()}">${confidenceLabel(listing.confidence)}</span>
+        </div>
+      </div>
+      <div class="listing-card__detail" hidden></div>
+    `;
+    const detail = card.querySelector(".listing-card__detail");
+    const summary = card.querySelector(".listing-card__summary");
+    summary.addEventListener("click", () => {
+      const isOpen = !detail.hidden;
+      if (isOpen) {
+        detail.hidden = true;
+      } else {
+        detail.innerHTML = renderListingDetail(listing, params);
+        detail.hidden = false;
+      }
+    });
+    body.appendChild(card);
   });
-  return columns;
+
+  overlay.hidden = false;
 }
 
-function buildSubdivisionFilterControls(rows, table) {
+function closeSubdivisionModal() {
+  document.getElementById("subdivision-modal").hidden = true;
+}
+
+function buildSubdivisionFilterControls(listings, refresh) {
   const container = document.getElementById("subdivision-filters");
-  const applyFilters = () => table.setFilter(subdivisionRowMatchesFilters);
 
   const multiSelectRefreshers = [];
   const rangeResetters = [];
 
   SUBDIVISION_MULTI_FIELDS.forEach(({ field, label }) => {
-    const options = distinctValues(rows, field);
-    const { wrapper, refresh } = createMultiSelect(
-      field, label, options, subdivisionFilterState.multi[field], applyFilters
+    const options = distinctValues(listings, field);
+    const { wrapper, refresh: refreshSelect } = createMultiSelect(
+      field, label, options, subdivisionFilterState.multi[field], refresh
     );
-    multiSelectRefreshers.push(refresh);
+    multiSelectRefreshers.push(refreshSelect);
     container.appendChild(wrapper);
   });
 
   SUBDIVISION_RANGE_FIELDS.forEach(({ field, label }) => {
     const { wrapper, reset } = createRangeFilter(label, (min, max) => {
       subdivisionFilterState.range[field] = { min, max };
-      applyFilters();
+      refresh();
     });
     rangeResetters.push(reset);
     container.appendChild(wrapper);
@@ -463,13 +562,13 @@ function buildSubdivisionFilterControls(rows, table) {
   document.getElementById("subdivision-clear-filters").addEventListener("click", () => {
     SUBDIVISION_MULTI_FIELDS.forEach(({ field }) => subdivisionFilterState.multi[field].clear());
     SUBDIVISION_RANGE_FIELDS.forEach(({ field }) => (subdivisionFilterState.range[field] = { min: null, max: null }));
-    multiSelectRefreshers.forEach((refresh) => refresh());
-    rangeResetters.forEach((reset) => reset());
-    applyFilters();
+    multiSelectRefreshers.forEach((r) => r());
+    rangeResetters.forEach((r) => r());
+    refresh();
   });
 }
 
-function buildSubdivisionParamControls(defaults, table) {
+function buildSubdivisionParamControls(defaults, refresh) {
   const container = document.getElementById("subdivision-params");
 
   const costInput = document.createElement("input");
@@ -488,7 +587,7 @@ function buildSubdivisionParamControls(defaults, table) {
   const recompute = debounce(() => {
     subdivisionParams.costPerLot = Number(costInput.value) || 0;
     subdivisionParams.stampDutyBufferPct = Number(stampInput.value) || 0;
-    table.redraw(true);
+    refresh();
   }, 200);
   costInput.addEventListener("input", recompute);
   stampInput.addEventListener("input", recompute);
@@ -509,26 +608,37 @@ function buildSubdivisionParamControls(defaults, table) {
 
 function buildSubdivisionTab(payload) {
   const sub = payload.subdivision;
+  const listings = sub.listings;
 
   const table = new Tabulator("#subdivision-table", {
-    data: sub.rows,
-    columns: buildSubdivisionColumns(sub.columns),
+    data: buildSuburbGroups(listings, subdivisionParams),
+    columns: buildSuburbColumns(),
     layout: "fitDataFill",
     height: "calc(100vh - 280px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
     paginationSizeSelector: [25, 50, 100, 250, 500],
-    initialSort: [{ column: "_estimated_profit", dir: "desc" }],
-    placeholder: "No matching subdivision candidates",
+    initialSort: [{ column: "index", dir: "desc" }],
+    placeholder: "No profitable subdivision opportunities match these filters",
   });
 
+  const refresh = () => {
+    table.setData(buildSuburbGroups(listings, subdivisionParams));
+  };
+
   table.on("tableBuilt", () => {
-    buildSubdivisionFilterControls(sub.rows, table);
-    buildSubdivisionParamControls(sub, table);
+    buildSubdivisionFilterControls(listings, refresh);
+    buildSubdivisionParamControls(sub, refresh);
   });
-  table.on("dataFiltered", () => updateRowCount(table, "subdivision-row-count", "candidates"));
-  table.on("renderComplete", () => updateRowCount(table, "subdivision-row-count", "candidates"));
+  table.on("rowClick", (e, row) => openSuburbModal(row.getData(), subdivisionParams));
+  table.on("dataFiltered", () => updateRowCount(table, "subdivision-row-count", "suburbs"));
+  table.on("renderComplete", () => updateRowCount(table, "subdivision-row-count", "suburbs"));
+
+  document.getElementById("subdivision-modal-close").addEventListener("click", closeSubdivisionModal);
+  document.getElementById("subdivision-modal").addEventListener("click", (e) => {
+    if (e.target.id === "subdivision-modal") closeSubdivisionModal();
+  });
 
   return table;
 }
