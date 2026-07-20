@@ -8,8 +8,8 @@ const MULTI_FIELDS = [
   { field: "zone", label: "Zone" },
 ];
 
-// Plain contains-text filters for free-form fields (not a good fit for checkboxes).
-const TEXT_FIELDS = [
+// Min/max range filters.
+const RANGE_FIELDS = [
   { field: "price", label: "Price" },
   { field: "land_size_m2", label: "Land (m²)" },
 ];
@@ -17,10 +17,10 @@ const TEXT_FIELDS = [
 const filterState = {
   search: "",
   multi: {},
-  text: {},
+  range: {},
 };
 MULTI_FIELDS.forEach((f) => (filterState.multi[f.field] = new Set()));
-TEXT_FIELDS.forEach((f) => (filterState.text[f.field] = ""));
+RANGE_FIELDS.forEach((f) => (filterState.range[f.field] = { min: null, max: null }));
 
 function debounce(fn, delay) {
   let timer = null;
@@ -120,11 +120,11 @@ function rowMatchesFilters(row) {
     }
   }
 
-  for (const { field } of TEXT_FIELDS) {
-    const term2 = filterState.text[field];
-    if (term2 && !String(row[field] ?? "").toLowerCase().includes(term2)) {
-      return false;
-    }
+  for (const { field } of RANGE_FIELDS) {
+    const { min, max } = filterState.range[field];
+    const value = row[field];
+    if (min != null && (value == null || value < min)) return false;
+    if (max != null && (value == null || value > max)) return false;
   }
 
   return true;
@@ -271,32 +271,12 @@ function createRangeFilter(label, onChange) {
   };
 }
 
-function createTextFilter(field, label, onChange) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "textfilter";
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.placeholder = label;
-  input.className = "textfilter__input";
-  input.addEventListener(
-    "input",
-    debounce(() => {
-      filterState.text[field] = input.value.trim().toLowerCase();
-      onChange();
-    }, 200)
-  );
-
-  wrapper.appendChild(input);
-  return { wrapper, input };
-}
-
 function buildFilterControls(rows, table) {
   const container = document.getElementById("filters");
   const applyFilters = () => table.setFilter(rowMatchesFilters);
 
-  const textInputs = [];
   const multiSelectRefreshers = [];
+  const rangeResetters = [];
 
   MULTI_FIELDS.forEach(({ field, label }) => {
     const options = distinctValues(rows, field);
@@ -305,9 +285,12 @@ function buildFilterControls(rows, table) {
     container.appendChild(wrapper);
   });
 
-  TEXT_FIELDS.forEach(({ field, label }) => {
-    const { wrapper, input } = createTextFilter(field, label, applyFilters);
-    textInputs.push(input);
+  RANGE_FIELDS.forEach(({ field, label }) => {
+    const { wrapper, reset } = createRangeFilter(label, (min, max) => {
+      filterState.range[field] = { min, max };
+      applyFilters();
+    });
+    rangeResetters.push(reset);
     container.appendChild(wrapper);
   });
 
@@ -317,9 +300,9 @@ function buildFilterControls(rows, table) {
     filterState.search = "";
     document.getElementById("search-box").value = "";
     MULTI_FIELDS.forEach(({ field }) => filterState.multi[field].clear());
-    TEXT_FIELDS.forEach(({ field }) => (filterState.text[field] = ""));
-    textInputs.forEach((input) => (input.value = ""));
+    RANGE_FIELDS.forEach(({ field }) => (filterState.range[field] = { min: null, max: null }));
     multiSelectRefreshers.forEach((refresh) => refresh());
+    rangeResetters.forEach((reset) => reset());
     applyFilters();
   });
 }

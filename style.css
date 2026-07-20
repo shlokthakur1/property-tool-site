@@ -181,15 +181,6 @@ body {
   margin: 0;
 }
 
-/* Plain text filters */
-.textfilter__input {
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
-  width: 130px;
-}
-
 #property-table {
   margin: 16px 24px;
 }
