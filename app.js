@@ -12,6 +12,9 @@ const MULTI_FIELDS = [
 const RANGE_FIELDS = [
   { field: "price", label: "Price" },
   { field: "land_size_m2", label: "Land (m²)" },
+  { field: "irsad_aus_decile", label: "IRSAD Decile" },
+  { field: "population_change_pct_5yr", label: "Pop. Growth (5yr)" },
+  { field: "building_approvals_per_1000_pop", label: "Approvals /1000 Pop." },
 ];
 
 const filterState = {
@@ -46,9 +49,34 @@ function buildColumns(columnsCfg) {
       col.field === "land_size_m2" ||
       col.field === "suburb_comparable_count" ||
       col.field === "min_lot_size_m2" ||
-      col.field === "min_frontage_m"
+      col.field === "min_frontage_m" ||
+      col.field === "irsad_aus_decile" ||
+      col.field === "new_dwelling_approvals_fy" ||
+      col.field === "building_approvals_per_1000_pop"
     ) {
       return { ...base, sorter: "number" };
+    }
+    if (col.field === "census_2021_population" || col.field === "population_2025") {
+      return {
+        ...base,
+        sorter: "number",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          return value == null ? "" : Math.round(value).toLocaleString();
+        },
+      };
+    }
+    if (col.field === "population_change_pct_5yr" || col.field === "population_change_pct_1yr") {
+      return {
+        ...base,
+        sorter: "number",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          if (value == null) return "";
+          const sign = value > 0 ? "+" : "";
+          return `${sign}${value.toFixed(1)}%`;
+        },
+      };
     }
     if (col.field === "max_new_lots_estimate") {
       return {
