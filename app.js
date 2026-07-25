@@ -15,6 +15,7 @@ const RANGE_FIELDS = [
   { field: "irsad_aus_decile", label: "IRSAD Decile" },
   { field: "population_change_pct_5yr", label: "Pop. Growth (5yr)" },
   { field: "building_approvals_per_1000_pop", label: "Approvals /1000 Pop." },
+  { field: "months_of_supply", label: "Months of Supply" },
 ];
 
 const filterState = {
@@ -52,7 +53,9 @@ function buildColumns(columnsCfg) {
       col.field === "min_frontage_m" ||
       col.field === "irsad_aus_decile" ||
       col.field === "new_dwelling_approvals_fy" ||
-      col.field === "building_approvals_per_1000_pop"
+      col.field === "building_approvals_per_1000_pop" ||
+      col.field === "stock_on_market" ||
+      col.field === "months_of_supply"
     ) {
       return { ...base, sorter: "number" };
     }
@@ -654,6 +657,30 @@ function buildSubdivisionTab(payload) {
   return table;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Data Definitions tab — one row per Data Table column, sourced directly from
+// payload.columns (description/formula come straight from site.columns in
+// config.yaml, see build_site.py select_rows) so this never drifts out of
+// sync with what the Data Table actually shows.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildDefinitionsTab(payload) {
+  const container = document.getElementById("definitions-list");
+  const rows = payload.columns.map((col) => `
+    <tr>
+      <td>${col.title}</td>
+      <td>${col.description ?? "—"}</td>
+      <td>${col.formula ? `<code>${col.formula}</code>` : "—"}</td>
+    </tr>
+  `).join("");
+
+  container.innerHTML = `
+    <table class="comps-table">
+      <thead><tr><th>Column</th><th>Description</th><th>Formula</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
 function setupTabs(subdivisionTable) {
   // The Subdivision table is built while its panel is still display:none (only
   // the Data Table tab starts visible), so Tabulator measures a zero-width
@@ -735,6 +762,7 @@ async function main() {
   });
 
   const subdivisionTable = buildSubdivisionTab(payload);
+  buildDefinitionsTab(payload);
   setupTabs(subdivisionTable);
 }
 

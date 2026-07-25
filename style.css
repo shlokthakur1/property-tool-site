@@ -261,6 +261,29 @@ body {
   margin: 16px 24px;
 }
 
+#definitions-list {
+  margin: 16px 24px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+#definitions-list .comps-table {
+  font-size: 13px;
+}
+
+#definitions-list .comps-table th {
+  background: #f5f6f8;
+}
+
+#definitions-list .comps-table code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
 /* Range (min/max) filter */
 .rangefilter {
   display: flex;

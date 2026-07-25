@@ -23,6 +23,7 @@
   <nav class="tabs">
     <button class="tabs__btn is-active" data-tab="datatable">Data Table</button>
     <button class="tabs__btn" data-tab="subdivision">Subdivision</button>
+    <button class="tabs__btn" data-tab="definitions">Data Definitions</button>
   </nav>
 
   <section id="tab-datatable" class="tab-panel is-active">
@@ -54,6 +55,14 @@
     </p>
 
     <div id="subdivision-table"></div>
+  </section>
+
+  <section id="tab-definitions" class="tab-panel">
+    <p class="subdivision-note">
+      Every column in the Data Table tab, what it means, and how it's calculated (where it's
+      a calculated value rather than a raw field from the listing).
+    </p>
+    <div id="definitions-list"></div>
   </section>
 
   <div id="subdivision-modal" class="modal-overlay" hidden>
