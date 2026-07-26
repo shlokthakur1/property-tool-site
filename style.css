@@ -518,3 +518,213 @@ body {
 .comps-table a:hover {
   text-decoration: underline;
 }
+
+/* Data Definitions — one table per tab documented */
+.definitions-heading {
+  margin: 20px 24px 4px;
+  font-size: 15px;
+}
+
+.definitions-heading:first-child {
+  margin-top: 4px;
+}
+
+/* Strategies bar (Suburb Finder toolbar) */
+.strategies-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.strategies-dropdown {
+  position: relative;
+}
+
+.strategies-dropdown__panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: 300px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+}
+
+.strategies-dropdown__panel.is-open {
+  display: block;
+}
+
+.strategies-dropdown__empty {
+  margin: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.strategy-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.strategy-item:hover {
+  background: #f5f6f8;
+}
+
+.strategy-item__name {
+  flex: 1;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 6px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.strategy-item__delete {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+
+.strategy-item__delete:hover {
+  color: #b3261e;
+}
+
+/* hTag-style nested filter builder (Suburb Finder tab) */
+.querybuilder {
+  margin: 4px 24px 16px;
+}
+
+.qb-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.qb-group--nested {
+  background: #f7f9fc;
+  margin: 4px 0;
+}
+
+.qb-group-body {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+}
+
+.qb-combinator {
+  flex: 0 0 auto;
+  width: 40px;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  background: #eef4ff;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  padding: 8px 0;
+}
+
+.qb-combinator:hover {
+  background: #e0ebff;
+}
+
+.qb-rows {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.qb-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qb-row-wrap > .qb-group {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.qb-rule {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.qb-select {
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.qb-value {
+  display: flex;
+  gap: 6px;
+}
+
+.qb-value-input {
+  width: 140px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.qb-value-input--text {
+  width: 200px;
+}
+
+.qb-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+.qb-btn-icon {
+  width: 30px;
+  padding: 6px 0;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.qb-btn-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.qb-add {
+  flex: 0 0 auto;
+  align-self: flex-start;
+}

@@ -22,6 +22,7 @@
 
   <nav class="tabs">
     <button class="tabs__btn is-active" data-tab="datatable">Data Table</button>
+    <button class="tabs__btn" data-tab="suburbfinder">Suburb Finder</button>
     <button class="tabs__btn" data-tab="subdivision">Subdivision</button>
     <button class="tabs__btn" data-tab="definitions">Data Definitions</button>
   </nav>
@@ -35,6 +36,29 @@
     </section>
 
     <div id="property-table"></div>
+  </section>
+
+  <section id="tab-suburbfinder" class="tab-panel">
+    <section class="toolbar toolbar--wrap">
+      <div class="strategies-bar">
+        <div id="suburbfinder-strategies" class="strategies"></div>
+        <button id="suburbfinder-save-strategy" class="btn btn--secondary">Save as Strategy</button>
+      </div>
+      <button id="suburbfinder-clear-filters" class="btn btn--ghost">Clear filters</button>
+      <span id="suburbfinder-row-count" class="toolbar__count"></span>
+    </section>
+    <div id="suburbfinder-querybuilder" class="querybuilder"></div>
+    <p class="subdivision-note">
+      One row per suburb, computed from the full listing history (including the 2-year sold sweep) —
+      not just what's browsable in Data Table. Build a filter below (field / condition / value per row,
+      the left-hand toggle sets AND/OR for that group, "&gt;" nests a condition into a sub-group with the
+      row above it) and save it as a named Strategy to reuse later. Real price growth (3mo/12mo/2yr) isn't
+      shown yet — it needs a genuine per-listing sale date the source API doesn't provide; see
+      <code>suburb_columns</code> in <code>config.yaml</code> for details. See the Data Definitions tab for
+      what every column here means.
+    </p>
+
+    <div id="suburb-table"></div>
   </section>
 
   <section id="tab-subdivision" class="tab-panel">

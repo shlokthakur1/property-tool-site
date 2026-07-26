@@ -162,7 +162,7 @@ function rowMatchesFilters(row) {
 }
 
 function closeAllPanels(except) {
-  document.querySelectorAll(".multiselect__panel.is-open").forEach((panel) => {
+  document.querySelectorAll(".multiselect__panel.is-open, .strategies-dropdown__panel.is-open").forEach((panel) => {
     if (panel !== except) panel.classList.remove("is-open");
   });
 }
@@ -658,22 +658,675 @@ function buildSubdivisionTab(payload) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Data Definitions tab — one row per Data Table column, sourced directly from
-// payload.columns (description/formula come straight from site.columns in
-// config.yaml, see build_site.py select_rows) so this never drifts out of
-// sync with what the Data Table actually shows.
+// hTag-style nested filter builder — a recursive AND/OR condition tree, used
+// by the Suburb Finder tab (see references/... image for the UI this is
+// modeled on: field / condition / value per row, a group-level AND/OR toggle
+// on the left, "›" nests a row into a sub-group with the row above it, "×"
+// removes it). Deliberately generic (driven entirely by a `fieldCatalog` of
+// {field, label, type, options?}), so it isn't tied to one tab's column set.
+//
+// Tree shape: { kind: "group", combinator: "AND"|"OR", children: [...] }
+// where each child is either another group or { kind: "rule", field,
+// operator, value, value2 }. An empty group matches everything (vacuous AND
+// = true), which is what "no filter yet" should do.
 // ─────────────────────────────────────────────────────────────────────────────
-function buildDefinitionsTab(payload) {
-  const container = document.getElementById("definitions-list");
-  const rows = payload.columns.map((col) => `
+let qbIdCounter = 0;
+function qbNextId() {
+  qbIdCounter += 1;
+  return `qb-${qbIdCounter}`;
+}
+
+const QB_OPERATORS = {
+  number: [
+    { op: "eq", label: "Equals" },
+    { op: "neq", label: "Not equals" },
+    { op: "gt", label: "Greater than" },
+    { op: "gte", label: "Greater than or equal" },
+    { op: "lt", label: "Less than" },
+    { op: "lte", label: "Less than or equal" },
+    { op: "between", label: "Between" },
+    { op: "empty", label: "Is empty" },
+    { op: "notempty", label: "Is not empty" },
+  ],
+  categorical: [
+    { op: "eq", label: "Equals" },
+    { op: "neq", label: "Not equals" },
+    { op: "in", label: "Is any of" },
+    { op: "contains", label: "Contains" },
+    { op: "empty", label: "Is empty" },
+    { op: "notempty", label: "Is not empty" },
+  ],
+  text: [
+    { op: "contains", label: "Contains" },
+    { op: "eq", label: "Equals" },
+    { op: "neq", label: "Not equals" },
+    { op: "empty", label: "Is empty" },
+    { op: "notempty", label: "Is not empty" },
+  ],
+};
+
+function qbDefaultOperator(type) {
+  return QB_OPERATORS[type][0].op;
+}
+
+function qbNewGroup(combinator, children) {
+  return { id: qbNextId(), kind: "group", combinator: combinator || "AND", children: children || [] };
+}
+
+function qbNewRule(fieldCatalog) {
+  const field = fieldCatalog[0];
+  return { id: qbNextId(), kind: "rule", field: field.field, operator: qbDefaultOperator(field.type), value: null, value2: null };
+}
+
+function qbCoerceNumber(v) {
+  if (v === "" || v == null) return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+function qbRuleMatches(row, rule, fieldMap) {
+  const meta = fieldMap.get(rule.field);
+  if (!meta) return true; // unknown field (e.g. a stale loaded strategy) — ignore rather than exclude every row
+  const raw = row[rule.field];
+  const isEmpty = raw === null || raw === undefined || raw === "";
+
+  if (rule.operator === "empty") return isEmpty;
+  if (rule.operator === "notempty") return !isEmpty;
+  if (isEmpty) return false; // every other operator needs a real value to compare against
+
+  if (meta.type === "number") {
+    const value = Number(raw);
+    if (rule.operator === "between") {
+      const a = qbCoerceNumber(rule.value);
+      const b = qbCoerceNumber(rule.value2);
+      if (a != null && value < a) return false;
+      if (b != null && value > b) return false;
+      return true;
+    }
+    const a = qbCoerceNumber(rule.value);
+    if (a == null) return true; // no comparison value entered yet
+    switch (rule.operator) {
+      case "eq": return value === a;
+      case "neq": return value !== a;
+      case "gt": return value > a;
+      case "gte": return value >= a;
+      case "lt": return value < a;
+      case "lte": return value <= a;
+      default: return true;
+    }
+  }
+
+  const strValue = String(raw);
+  if (rule.operator === "in") {
+    const set = Array.isArray(rule.value) ? rule.value : [];
+    return set.length === 0 || set.includes(strValue);
+  }
+  const cmp = rule.value == null ? "" : String(rule.value);
+  if (cmp === "") return true; // no comparison value entered yet
+  switch (rule.operator) {
+    case "eq": return strValue.toLowerCase() === cmp.toLowerCase();
+    case "neq": return strValue.toLowerCase() !== cmp.toLowerCase();
+    case "contains": return strValue.toLowerCase().includes(cmp.toLowerCase());
+    default: return true;
+  }
+}
+
+function qbGroupMatches(row, group, fieldMap) {
+  if (!group.children.length) return true;
+  const results = group.children.map((child) =>
+    child.kind === "group" ? qbGroupMatches(row, child, fieldMap) : qbRuleMatches(row, child, fieldMap)
+  );
+  return group.combinator === "AND" ? results.every(Boolean) : results.some(Boolean);
+}
+
+function qbFormatValue(rule, meta) {
+  if (meta?.type === "number") {
+    return rule.operator === "between" ? `${rule.value ?? "…"}–${rule.value2 ?? "…"}` : (rule.value ?? "…");
+  }
+  if (rule.operator === "in") {
+    return Array.isArray(rule.value) && rule.value.length ? rule.value.join("/") : "…";
+  }
+  return rule.value || "…";
+}
+
+function qbDescribeRule(rule, fieldMap) {
+  const meta = fieldMap.get(rule.field);
+  const label = meta ? meta.label : rule.field;
+  const opDef = (QB_OPERATORS[meta?.type ?? "text"].find((o) => o.op === rule.operator)) || { label: rule.operator };
+  if (rule.operator === "empty" || rule.operator === "notempty") return `${label} ${opDef.label.toLowerCase()}`;
+  return `${label} ${opDef.label.toLowerCase()} ${qbFormatValue(rule, meta)}`;
+}
+
+function qbDescribeGroup(group, fieldMap) {
+  if (!group.children.length) return "";
+  const parts = group.children.map((child) =>
+    child.kind === "group" ? `(${qbDescribeGroup(child, fieldMap)})` : qbDescribeRule(child, fieldMap)
+  );
+  return parts.join(` ${group.combinator} `);
+}
+
+function qbGenerateStrategyName(group, fieldMap) {
+  const desc = qbDescribeGroup(group, fieldMap);
+  if (!desc) return "Untitled strategy";
+  return desc.length > 80 ? `${desc.slice(0, 77)}...` : desc;
+}
+
+function qbRemoveChild(group, index) {
+  group.children.splice(index, 1);
+}
+
+// Nests the row at `index` together with the row above it into a new AND
+// sub-group (or, if the row above is already a group, just joins it) — the
+// "move right" behaviour from the reference image.
+function qbMoveRight(group, index) {
+  if (index === 0) return;
+  const [moved] = group.children.splice(index, 1);
+  const prev = group.children[index - 1];
+  if (prev.kind === "group") {
+    prev.children.push(moved);
+  } else {
+    group.children[index - 1] = qbNewGroup("AND", [prev, moved]);
+  }
+}
+
+// After a structural edit, collapse pointless nesting: a group left with no
+// children disappears, a group left with exactly one child is replaced by
+// that child directly. Never removes/replaces the passed-in `group` object
+// itself (only mutates its `.children`), so this is safe to call on the root.
+function qbFlatten(group) {
+  group.children = group.children.filter((child) => {
+    if (child.kind !== "group") return true;
+    qbFlatten(child);
+    return child.children.length > 0;
+  });
+  group.children = group.children.map((child) =>
+    (child.kind === "group" && child.children.length === 1) ? child.children[0] : child
+  );
+}
+
+// Drops rules referencing fields not in `fieldMap` (loading a strategy saved
+// against a different column set), then relies on the caller running
+// qbFlatten to collapse whatever that leaves empty. Returns how many rules
+// were dropped.
+function qbPruneToFields(group, fieldMap) {
+  let dropped = 0;
+  group.children = group.children.filter((child) => {
+    if (child.kind === "group") {
+      dropped += qbPruneToFields(child, fieldMap);
+      return true;
+    }
+    const keep = fieldMap.has(child.field);
+    if (!keep) dropped += 1;
+    return keep;
+  });
+  return dropped;
+}
+
+function qbRenderValueControl(rule, meta, onChange) {
+  const wrap = document.createElement("span");
+  wrap.className = "qb-value";
+
+  if (meta.type === "number") {
+    const makeInput = (val, placeholder, onInput) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "qb-value-input";
+      input.value = val ?? "";
+      input.placeholder = placeholder;
+      input.addEventListener("input", debounce(onInput, 250));
+      return input;
+    };
+    wrap.appendChild(makeInput(rule.value, rule.operator === "between" ? "Min" : "Value", (e) => {
+      rule.value = e.target.value;
+      onChange(false);
+    }));
+    if (rule.operator === "between") {
+      wrap.appendChild(makeInput(rule.value2, "Max", (e) => {
+        rule.value2 = e.target.value;
+        onChange(false);
+      }));
+    }
+    return wrap;
+  }
+
+  if (meta.type === "categorical" && rule.operator === "in") {
+    if (!Array.isArray(rule.value)) rule.value = [];
+    const selectedSet = new Set(rule.value);
+    const { wrapper } = createMultiSelect(rule.field, "Select values", meta.options || [], selectedSet, () => {
+      rule.value = Array.from(selectedSet);
+      onChange(false);
+    });
+    wrap.appendChild(wrapper);
+    return wrap;
+  }
+
+  if (meta.type === "categorical" && meta.options && meta.options.length) {
+    const select = document.createElement("select");
+    select.className = "qb-select qb-select-value";
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "Select…";
+    select.appendChild(blank);
+    meta.options.forEach((opt) => {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      if (rule.value === opt) o.selected = true;
+      select.appendChild(o);
+    });
+    select.addEventListener("change", () => {
+      rule.value = select.value;
+      onChange(false);
+    });
+    wrap.appendChild(select);
+    return wrap;
+  }
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "qb-value-input qb-value-input--text";
+  input.value = rule.value ?? "";
+  input.placeholder = "Value";
+  input.addEventListener("input", debounce(() => {
+    rule.value = input.value;
+    onChange(false);
+  }, 250));
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function qbRenderRule(rule, fieldCatalog, fieldMap, onChange) {
+  const el = document.createElement("div");
+  el.className = "qb-rule";
+
+  const fieldSelect = document.createElement("select");
+  fieldSelect.className = "qb-select";
+  fieldCatalog.forEach((f) => {
+    const opt = document.createElement("option");
+    opt.value = f.field;
+    opt.textContent = f.label;
+    if (f.field === rule.field) opt.selected = true;
+    fieldSelect.appendChild(opt);
+  });
+  fieldSelect.addEventListener("change", () => {
+    rule.field = fieldSelect.value;
+    const meta = fieldMap.get(rule.field);
+    rule.operator = qbDefaultOperator(meta.type);
+    rule.value = null;
+    rule.value2 = null;
+    onChange();
+  });
+  el.appendChild(fieldSelect);
+
+  const meta = fieldMap.get(rule.field) || { type: "text" };
+  const opSelect = document.createElement("select");
+  opSelect.className = "qb-select";
+  QB_OPERATORS[meta.type].forEach((o) => {
+    const opt = document.createElement("option");
+    opt.value = o.op;
+    opt.textContent = o.label;
+    if (o.op === rule.operator) opt.selected = true;
+    opSelect.appendChild(opt);
+  });
+  opSelect.addEventListener("change", () => {
+    rule.operator = opSelect.value;
+    rule.value = null;
+    rule.value2 = null;
+    onChange();
+  });
+  el.appendChild(opSelect);
+
+  if (rule.operator !== "empty" && rule.operator !== "notempty") {
+    el.appendChild(qbRenderValueControl(rule, meta, onChange));
+  }
+
+  return el;
+}
+
+function qbRenderGroup(group, fieldCatalog, fieldMap, onChange, depth) {
+  const el = document.createElement("div");
+  el.className = depth > 0 ? "qb-group qb-group--nested" : "qb-group";
+
+  const body = document.createElement("div");
+  body.className = "qb-group-body";
+
+  if (group.children.length >= 2) {
+    const combinatorBtn = document.createElement("button");
+    combinatorBtn.type = "button";
+    combinatorBtn.className = "qb-combinator";
+    combinatorBtn.textContent = group.combinator;
+    combinatorBtn.title = "Click to switch AND/OR for this group";
+    combinatorBtn.addEventListener("click", () => {
+      group.combinator = group.combinator === "AND" ? "OR" : "AND";
+      onChange();
+    });
+    body.appendChild(combinatorBtn);
+  }
+
+  const rows = document.createElement("div");
+  rows.className = "qb-rows";
+  group.children.forEach((child, index) => {
+    const rowWrap = document.createElement("div");
+    rowWrap.className = "qb-row-wrap";
+    rowWrap.appendChild(
+      child.kind === "group"
+        ? qbRenderGroup(child, fieldCatalog, fieldMap, onChange, depth + 1)
+        : qbRenderRule(child, fieldCatalog, fieldMap, onChange)
+    );
+
+    const actions = document.createElement("div");
+    actions.className = "qb-row-actions";
+
+    const rightBtn = document.createElement("button");
+    rightBtn.type = "button";
+    rightBtn.className = "btn btn--ghost qb-btn-icon";
+    rightBtn.textContent = "›";
+    rightBtn.title = "Nest with the row above";
+    rightBtn.disabled = index === 0;
+    rightBtn.addEventListener("click", () => {
+      qbMoveRight(group, index);
+      qbFlatten(group);
+      onChange();
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn--ghost qb-btn-icon";
+    removeBtn.textContent = "×";
+    removeBtn.title = "Remove";
+    removeBtn.addEventListener("click", () => {
+      qbRemoveChild(group, index);
+      qbFlatten(group);
+      onChange();
+    });
+
+    actions.appendChild(rightBtn);
+    actions.appendChild(removeBtn);
+    rowWrap.appendChild(actions);
+    rows.appendChild(rowWrap);
+  });
+  body.appendChild(rows);
+  el.appendChild(body);
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "btn btn--ghost qb-add";
+  addBtn.textContent = "+ Add Condition";
+  addBtn.addEventListener("click", () => {
+    group.children.push(qbNewRule(fieldCatalog));
+    onChange();
+  });
+  el.appendChild(addBtn);
+
+  return el;
+}
+
+function createQueryBuilder(container, fieldCatalog, options) {
+  const fieldMap = new Map(fieldCatalog.map((f) => [f.field, f]));
+  let root = qbNewGroup("AND", []);
+
+  function render() {
+    container.innerHTML = "";
+    container.appendChild(qbRenderGroup(root, fieldCatalog, fieldMap, handleChange, 0));
+  }
+
+  function handleChange(rerender) {
+    if (rerender !== false) render();
+    options.onFilterChange();
+  }
+
+  render();
+
+  return {
+    getGroup: () => root,
+    setGroup: (newGroup) => {
+      root = newGroup;
+      render();
+      options.onFilterChange();
+    },
+    clear: () => {
+      root = qbNewGroup("AND", []);
+      render();
+      options.onFilterChange();
+    },
+    matches: (row) => qbGroupMatches(row, root, fieldMap),
+    fieldMap,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Saved Strategies — named filter trees persisted in localStorage (this is a
+// static site with no backend), shared across any tab that wires up a query
+// builder. Loading one into a tab whose field catalog doesn't have all of a
+// strategy's fields drops just those conditions (see qbPruneToFields) rather
+// than failing to load at all.
+// ─────────────────────────────────────────────────────────────────────────────
+const QB_STRATEGY_STORAGE_KEY = "propertyTool.savedStrategies.v1";
+
+function qbLoadStrategies() {
+  try {
+    const raw = localStorage.getItem(QB_STRATEGY_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (err) {
+    console.error("Failed to read saved strategies", err);
+    return [];
+  }
+}
+
+function qbSaveStrategies(list) {
+  try {
+    localStorage.setItem(QB_STRATEGY_STORAGE_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.error("Failed to save strategies", err);
+  }
+}
+
+function wireSaveStrategyButton(button, qb) {
+  button.addEventListener("click", () => {
+    const group = qb.getGroup();
+    if (!group.children.length) {
+      alert("Add at least one condition before saving a Strategy.");
+      return;
+    }
+    const suggested = qbGenerateStrategyName(group, qb.fieldMap);
+    const name = prompt("Save this filter as a Strategy — name:", suggested);
+    if (!name) return;
+    const strategies = qbLoadStrategies();
+    strategies.push({
+      id: `strategy-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      name,
+      createdAt: new Date().toISOString(),
+      filterGroup: JSON.parse(JSON.stringify(group)),
+    });
+    qbSaveStrategies(strategies);
+  });
+}
+
+function createStrategiesPanel(container, qb) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "strategies-dropdown";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "btn btn--secondary strategies-dropdown__toggle";
+  toggle.textContent = "Load Strategy";
+  wrapper.appendChild(toggle);
+
+  const panel = document.createElement("div");
+  panel.className = "strategies-dropdown__panel";
+
+  function renderList() {
+    const strategies = qbLoadStrategies();
+    panel.innerHTML = "";
+    if (!strategies.length) {
+      const empty = document.createElement("p");
+      empty.className = "strategies-dropdown__empty";
+      empty.textContent = "No saved strategies yet.";
+      panel.appendChild(empty);
+      return;
+    }
+    strategies.forEach((s) => {
+      const item = document.createElement("div");
+      item.className = "strategy-item";
+
+      const nameBtn = document.createElement("button");
+      nameBtn.type = "button";
+      nameBtn.className = "strategy-item__name";
+      nameBtn.textContent = s.name;
+      nameBtn.title = `Saved ${new Date(s.createdAt).toLocaleString()}`;
+      nameBtn.addEventListener("click", () => {
+        const clone = JSON.parse(JSON.stringify(s.filterGroup));
+        const dropped = qbPruneToFields(clone, qb.fieldMap);
+        qbFlatten(clone);
+        qb.setGroup(clone);
+        panel.classList.remove("is-open");
+        if (dropped > 0) {
+          alert(`Loaded "${s.name}" — ${dropped} condition(s) skipped (field not available in this tab).`);
+        }
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "strategy-item__delete";
+      deleteBtn.textContent = "×";
+      deleteBtn.title = "Delete this strategy";
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        qbSaveStrategies(qbLoadStrategies().filter((x) => x.id !== s.id));
+        renderList();
+      });
+
+      item.appendChild(nameBtn);
+      item.appendChild(deleteBtn);
+      panel.appendChild(item);
+    });
+  }
+
+  toggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = panel.classList.contains("is-open");
+    closeAllPanels();
+    if (!isOpen) {
+      renderList();
+      panel.classList.add("is-open");
+    }
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+
+  wrapper.appendChild(panel);
+  container.appendChild(wrapper);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Suburb Finder tab — one row per (suburb, state), from payload.suburbs (see
+// build_suburb_stats in build_site.py). Filtering runs the hTag-style query
+// builder above directly against these already-aggregated rows — unlike
+// Subdivision, there's no live-adjustable re-aggregation, so a plain
+// table.setFilter is enough.
+// ─────────────────────────────────────────────────────────────────────────────
+const SUBURB_CATEGORICAL_FIELDS = new Set(["suburb", "state", "postcode", "zone"]);
+const SUBURB_MONEY_FIELDS = new Set(["median_price"]);
+const SUBURB_MONEY_PER_M2_FIELDS = new Set(["median_price_per_m2"]);
+const SUBURB_PERCENT_SIGNED_FIELDS = new Set([
+  "sale_through_rate_pct", "price_spread_pct", "population_change_pct_1yr", "population_change_pct_5yr",
+]);
+const SUBURB_INT_FIELDS = new Set([
+  "listing_count", "for_sale_count", "sold_recent_count", "subdivision_candidate_count",
+  "population_2025", "new_dwelling_approvals_fy", "median_land_size_m2", "median_min_lot_size_m2",
+]);
+
+function buildSuburbFieldCatalog(columnsCfg, rows) {
+  return columnsCfg.map((col) => {
+    const type = SUBURB_CATEGORICAL_FIELDS.has(col.field) ? "categorical" : "number";
+    const entry = { field: col.field, label: col.title, type };
+    if (type === "categorical") entry.options = distinctValues(rows, col.field);
+    return entry;
+  });
+}
+
+function formatPercentSigned(value) {
+  if (value == null) return "";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+function buildSuburbFinderColumns(columnsCfg) {
+  return columnsCfg.map((col) => {
+    const base = { field: col.field, title: col.title, headerFilter: false };
+    if (SUBURB_MONEY_FIELDS.has(col.field)) {
+      return { ...base, sorter: "number", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `$${Math.round(v).toLocaleString()}`;
+      } };
+    }
+    if (SUBURB_MONEY_PER_M2_FIELDS.has(col.field)) {
+      return { ...base, sorter: "number", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `$${Math.round(v).toLocaleString()}/m²`;
+      } };
+    }
+    if (SUBURB_PERCENT_SIGNED_FIELDS.has(col.field)) {
+      return { ...base, sorter: "number", formatter: (cell) => formatPercentSigned(cell.getValue()) };
+    }
+    if (SUBURB_INT_FIELDS.has(col.field)) {
+      return { ...base, sorter: "number", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : Math.round(v).toLocaleString();
+      } };
+    }
+    if (col.field === "state") return { ...base, width: 80 };
+    return { ...base, sorter: "number" };
+  });
+}
+
+function buildSuburbFinderTab(payload) {
+  const suburbs = payload.suburbs;
+  if (!suburbs) return null;
+
+  const table = new Tabulator("#suburb-table", {
+    data: suburbs.rows,
+    columns: buildSuburbFinderColumns(suburbs.columns),
+    layout: "fitDataFill",
+    height: "calc(100vh - 320px)",
+    pagination: true,
+    paginationMode: "local",
+    paginationSize: 50,
+    paginationSizeSelector: [25, 50, 100, 250, 500],
+    initialSort: [{ column: "median_price", dir: "desc" }],
+    placeholder: "No suburbs match these filters",
+  });
+
+  const fieldCatalog = buildSuburbFieldCatalog(suburbs.columns, suburbs.rows);
+  const qb = createQueryBuilder(document.getElementById("suburbfinder-querybuilder"), fieldCatalog, {
+    onFilterChange: () => table.setFilter((row) => qb.matches(row)),
+  });
+
+  createStrategiesPanel(document.getElementById("suburbfinder-strategies"), qb);
+  wireSaveStrategyButton(document.getElementById("suburbfinder-save-strategy"), qb);
+  document.getElementById("suburbfinder-clear-filters").addEventListener("click", () => qb.clear());
+
+  table.on("dataFiltered", () => updateRowCount(table, "suburbfinder-row-count", "suburbs"));
+  table.on("renderComplete", () => updateRowCount(table, "suburbfinder-row-count", "suburbs"));
+
+  return table;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data Definitions tab — one row per Data Table column (payload.columns) plus
+// one per Suburb Finder column (payload.suburbs.columns), both sourced
+// directly from config.yaml (site.columns / site.suburb_columns — see
+// build_site.py select_rows / build_suburb_stats) so this never drifts out of
+// sync with what those tabs actually show.
+// ─────────────────────────────────────────────────────────────────────────────
+function renderDefinitionsTable(columns) {
+  const rows = columns.map((col) => `
     <tr>
       <td>${col.title}</td>
       <td>${col.description ?? "—"}</td>
       <td>${col.formula ? `<code>${col.formula}</code>` : "—"}</td>
     </tr>
   `).join("");
-
-  container.innerHTML = `
+  return `
     <table class="comps-table">
       <thead><tr><th>Column</th><th>Description</th><th>Formula</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -681,12 +1334,21 @@ function buildDefinitionsTab(payload) {
   `;
 }
 
-function setupTabs(subdivisionTable) {
-  // The Subdivision table is built while its panel is still display:none (only
-  // the Data Table tab starts visible), so Tabulator measures a zero-width
-  // container at build time — redraw once the panel is actually shown so it
-  // sizes itself correctly.
-  let subdivisionRedrawn = false;
+function buildDefinitionsTab(payload) {
+  const container = document.getElementById("definitions-list");
+  let html = `<h3 class="definitions-heading">Data Table</h3>${renderDefinitionsTable(payload.columns)}`;
+  if (payload.suburbs) {
+    html += `<h3 class="definitions-heading">Suburb Finder</h3>${renderDefinitionsTable(payload.suburbs.columns)}`;
+  }
+  container.innerHTML = html;
+}
+
+function setupTabs(subdivisionTable, suburbFinderTable) {
+  // Tables built while their panel is still display:none (only the Data Table
+  // tab starts visible) get measured against a zero-width container by
+  // Tabulator — redraw once a panel is actually shown so it sizes correctly.
+  const redrawn = new Set();
+  const tableByTab = { subdivision: subdivisionTable, suburbfinder: suburbFinderTable };
 
   document.querySelectorAll(".tabs__btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -695,9 +1357,10 @@ function setupTabs(subdivisionTable) {
       btn.classList.add("is-active");
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add("is-active");
 
-      if (btn.dataset.tab === "subdivision" && !subdivisionRedrawn) {
-        subdivisionRedrawn = true;
-        subdivisionTable.redraw(true);
+      const table = tableByTab[btn.dataset.tab];
+      if (table && !redrawn.has(btn.dataset.tab)) {
+        redrawn.add(btn.dataset.tab);
+        table.redraw(true);
       }
     });
   });
@@ -762,8 +1425,9 @@ async function main() {
   });
 
   const subdivisionTable = buildSubdivisionTab(payload);
+  const suburbFinderTable = buildSuburbFinderTab(payload);
   buildDefinitionsTab(payload);
-  setupTabs(subdivisionTable);
+  setupTabs(subdivisionTable, suburbFinderTable);
 }
 
 main().catch((err) => {
