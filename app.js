@@ -1229,6 +1229,7 @@ const SUBURB_MONEY_FIELDS = new Set(["median_price"]);
 const SUBURB_MONEY_PER_M2_FIELDS = new Set(["median_price_per_m2"]);
 const SUBURB_PERCENT_SIGNED_FIELDS = new Set([
   "sale_through_rate_pct", "price_spread_pct", "population_change_pct_1yr", "population_change_pct_5yr",
+  "price_growth_1mo_pct", "price_growth_6mo_pct", "price_growth_1yr_pct", "price_growth_2yr_pct",
 ]);
 const SUBURB_INT_FIELDS = new Set([
   "listing_count", "for_sale_count", "sold_recent_count", "subdivision_candidate_count",

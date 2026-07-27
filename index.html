@@ -52,10 +52,12 @@
       One row per suburb, computed from the full listing history (including the 2-year sold sweep) —
       not just what's browsable in Data Table. Build a filter below (field / condition / value per row,
       the left-hand toggle sets AND/OR for that group, "&gt;" nests a condition into a sub-group with the
-      row above it) and save it as a named Strategy to reuse later. Real price growth (3mo/12mo/2yr) isn't
-      shown yet — it needs a genuine per-listing sale date the source API doesn't provide; see
-      <code>suburb_columns</code> in <code>config.yaml</code> for details. See the Data Definitions tab for
-      what every column here means.
+      row above it) and save it as a named Strategy to reuse later. Price growth (1mo/6mo/1yr/2yr) compares
+      median sold price across two equal-width windows ending today, e.g. 1yr growth is the last ~6 months
+      vs the ~6 months before that — 1mo especially will be blank for lower-volume suburbs, since it needs
+      3+ dated sales on each side of a ~2-week split. See <code>suburb_columns</code> in
+      <code>config.yaml</code> for the full methodology, and the Data Definitions tab for what every column
+      here means.
     </p>
 
     <div id="suburb-table"></div>
