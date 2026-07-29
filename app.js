@@ -6,6 +6,7 @@ const MULTI_FIELDS = [
   { field: "suburb", label: "Suburb" },
   { field: "postcode", label: "Postcode" },
   { field: "zone", label: "Zone" },
+  { field: "data_confidence", label: "Data Confidence" },
 ];
 
 // Min/max range filters.
@@ -16,6 +17,7 @@ const RANGE_FIELDS = [
   { field: "population_change_pct_5yr", label: "Pop. Growth (5yr)" },
   { field: "building_approvals_per_1000_pop", label: "Approvals /1000 Pop." },
   { field: "months_of_supply", label: "Months of Supply" },
+  { field: "distance_to_gpo_km", label: "Distance to GPO (km)" },
 ];
 
 const filterState = {
@@ -55,9 +57,20 @@ function buildColumns(columnsCfg) {
       col.field === "new_dwelling_approvals_fy" ||
       col.field === "building_approvals_per_1000_pop" ||
       col.field === "stock_on_market" ||
-      col.field === "months_of_supply"
+      col.field === "months_of_supply" ||
+      col.field === "distance_to_gpo_km"
     ) {
       return { ...base, sorter: "number" };
+    }
+    if (col.field === "non_res_building_approvals_value_fy" || col.field === "infrastructure_spend_per_capita") {
+      return {
+        ...base,
+        sorter: "number",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          return value == null ? "" : `$${Math.round(value).toLocaleString()}`;
+        },
+      };
     }
     if (col.field === "census_2021_population" || col.field === "population_2025") {
       return {
@@ -1224,16 +1237,20 @@ function createStrategiesPanel(container, qb) {
 // Subdivision, there's no live-adjustable re-aggregation, so a plain
 // table.setFilter is enough.
 // ─────────────────────────────────────────────────────────────────────────────
-const SUBURB_CATEGORICAL_FIELDS = new Set(["suburb", "state", "postcode", "zone"]);
-const SUBURB_MONEY_FIELDS = new Set(["median_price"]);
+const SUBURB_CATEGORICAL_FIELDS = new Set(["suburb", "state", "postcode", "zone", "data_confidence", "growth_rate_cycle"]);
+const SUBURB_MONEY_FIELDS = new Set(["median_price", "non_res_building_approvals_value_fy", "infrastructure_spend_per_capita"]);
 const SUBURB_MONEY_PER_M2_FIELDS = new Set(["median_price_per_m2"]);
+const SUBURB_MONEY_PER_WEEK_FIELDS = new Set(["median_rent_weekly"]);
+const SUBURB_KM_FIELDS = new Set(["distance_to_gpo_km"]);
 const SUBURB_PERCENT_SIGNED_FIELDS = new Set([
   "sale_through_rate_pct", "price_spread_pct", "population_change_pct_1yr", "population_change_pct_5yr",
   "price_growth_1mo_pct", "price_growth_6mo_pct", "price_growth_1yr_pct", "price_growth_2yr_pct",
+  "gross_rental_yield_pct",
 ]);
 const SUBURB_INT_FIELDS = new Set([
   "listing_count", "for_sale_count", "sold_recent_count", "subdivision_candidate_count",
   "population_2025", "new_dwelling_approvals_fy", "median_land_size_m2", "median_min_lot_size_m2",
+  "rentals_count", "volatility_index",
 ]);
 
 function buildSuburbFieldCatalog(columnsCfg, rows) {
@@ -1264,6 +1281,18 @@ function buildSuburbFinderColumns(columnsCfg) {
       return { ...base, sorter: "number", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : `$${Math.round(v).toLocaleString()}/m²`;
+      } };
+    }
+    if (SUBURB_MONEY_PER_WEEK_FIELDS.has(col.field)) {
+      return { ...base, sorter: "number", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `$${Math.round(v).toLocaleString()}/wk`;
+      } };
+    }
+    if (SUBURB_KM_FIELDS.has(col.field)) {
+      return { ...base, sorter: "number", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `${v.toFixed(1)} km`;
       } };
     }
     if (SUBURB_PERCENT_SIGNED_FIELDS.has(col.field)) {
