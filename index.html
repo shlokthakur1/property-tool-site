@@ -21,24 +21,13 @@
   </header>
 
   <nav class="tabs">
-    <button class="tabs__btn is-active" data-tab="datatable">Data Table</button>
-    <button class="tabs__btn" data-tab="suburbfinder">Suburb Finder</button>
+    <button class="tabs__btn is-active" data-tab="suburbfinder">Suburb Finder</button>
     <button class="tabs__btn" data-tab="subdivision">Subdivision</button>
+    <button class="tabs__btn" data-tab="datatable">Data Table</button>
     <button class="tabs__btn" data-tab="definitions">Data Definitions</button>
   </nav>
 
-  <section id="tab-datatable" class="tab-panel is-active">
-    <section class="toolbar">
-      <input id="search-box" type="text" placeholder="Search address..." class="toolbar__search" />
-      <div id="filters" class="toolbar__filters"></div>
-      <button id="clear-filters" class="btn btn--ghost">Clear filters</button>
-      <span id="row-count" class="toolbar__count"></span>
-    </section>
-
-    <div id="property-table"></div>
-  </section>
-
-  <section id="tab-suburbfinder" class="tab-panel">
+  <section id="tab-suburbfinder" class="tab-panel is-active">
     <section class="toolbar toolbar--wrap">
       <div class="strategies-bar">
         <div id="suburbfinder-strategies" class="strategies"></div>
@@ -83,6 +72,18 @@
     <div id="subdivision-table"></div>
   </section>
 
+  <section id="tab-datatable" class="tab-panel">
+    <section class="toolbar">
+      <input id="search-box" type="text" placeholder="Search address..." class="toolbar__search" />
+      <div id="filters" class="toolbar__filters"></div>
+      <button id="clear-filters" class="btn btn--ghost">Clear filters</button>
+      <button id="column-panel-toggle" class="btn btn--secondary">Columns</button>
+      <span id="row-count" class="toolbar__count"></span>
+    </section>
+
+    <div id="property-table"></div>
+  </section>
+
   <section id="tab-definitions" class="tab-panel">
     <p class="subdivision-note">
       Every column in the Data Table tab, what it means, and how it's calculated (where it's
@@ -100,6 +101,18 @@
       <div id="subdivision-modal-body" class="modal-body"></div>
     </div>
   </div>
+
+  <aside id="column-panel" class="column-panel" hidden>
+    <div class="column-panel__header">
+      <h3>Columns</h3>
+      <button id="column-panel-close" class="btn btn--ghost" aria-label="Close">✕</button>
+    </div>
+    <div class="column-panel__actions">
+      <button id="column-panel-all" class="btn btn--ghost">Select all</button>
+      <button id="column-panel-none" class="btn btn--ghost">Select none</button>
+    </div>
+    <div id="column-panel-groups" class="column-panel__groups"></div>
+  </aside>
 
   <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>

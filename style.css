@@ -519,6 +519,86 @@ body {
   text-decoration: underline;
 }
 
+/* Column visibility panel (Data Table tab) — slide-in from the right */
+.column-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 90vw);
+  background: #fff;
+  border-left: 1px solid var(--border);
+  box-shadow: -6px 0 20px rgba(0, 0, 0, 0.12);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+}
+
+.column-panel[hidden] {
+  display: none;
+}
+
+.column-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.column-panel__header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.column-panel__actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.column-panel__groups {
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.column-panel__group {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px;
+}
+
+.column-panel__group summary {
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.column-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.column-panel__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.column-panel__item:hover {
+  background: #f5f6f8;
+}
+
+.column-panel__item input {
+  margin: 0;
+}
+
 /* Data Definitions — one table per tab documented */
 .definitions-heading {
   margin: 20px 24px 4px;

@@ -36,8 +36,7 @@ function debounce(fn, delay) {
   };
 }
 
-function buildColumns(columnsCfg) {
-  return columnsCfg.map((col) => {
+function buildColumnDef(col) {
     const base = { field: col.field, title: col.title, headerFilter: false };
     if (col.field === "url") {
       return {
@@ -138,7 +137,28 @@ function buildColumns(columnsCfg) {
       };
     }
     return base;
+}
+
+// Wraps each column in a Tabulator column GROUP (a spanning parent header)
+// keyed by its `group` from config.yaml, in first-seen order — so the same
+// grouping shown in the column visibility panel (createColumnPanel) is also
+// visible as the table's own header structure. Hiding/showing individual
+// fields (table.showColumn/hideColumn) still works normally on grouped
+// columns; a group's header just spans however many of its children are
+// currently visible.
+function buildGroupedColumns(columnsCfg) {
+  const groups = [];
+  const byName = new Map();
+  columnsCfg.forEach((col) => {
+    const groupName = col.group || "Other";
+    if (!byName.has(groupName)) {
+      const groupDef = { title: groupName, columns: [] };
+      byName.set(groupName, groupDef);
+      groups.push(groupDef);
+    }
+    byName.get(groupName).columns.push(buildColumnDef(col));
   });
+  return groups;
 }
 
 function distinctValues(rows, field) {
@@ -1373,12 +1393,126 @@ function buildDefinitionsTab(payload) {
   container.innerHTML = html;
 }
 
-function setupTabs(subdivisionTable, suburbFinderTable) {
-  // Tables built while their panel is still display:none (only the Data Table
-  // tab starts visible) get measured against a zero-width container by
-  // Tabulator — redraw once a panel is actually shown so it sizes correctly.
-  const redrawn = new Set();
-  const tableByTab = { subdivision: subdivisionTable, suburbfinder: suburbFinderTable };
+// ─────────────────────────────────────────────────────────────────────────────
+// Column visibility panel (Data Table tab) — a right-hand slide-out panel,
+// grouped the same way as the table's own header groups (buildGroupedColumns
+// above), both driven by each column's `group` in config.yaml. Visibility
+// choices persist in localStorage so they survive a reload.
+// ─────────────────────────────────────────────────────────────────────────────
+const COLUMN_VISIBILITY_STORAGE_KEY = "datatable-hidden-columns";
+
+function loadHiddenColumns() {
+  try {
+    const raw = localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHiddenColumns(hidden) {
+  try {
+    localStorage.setItem(COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify([...hidden]));
+  } catch {
+    // localStorage unavailable (private browsing, full quota) — visibility choices just won't persist
+  }
+}
+
+function createColumnPanel(table, columnsCfg) {
+  const panel = document.getElementById("column-panel");
+  const groupsContainer = document.getElementById("column-panel-groups");
+  const toggleBtn = document.getElementById("column-panel-toggle");
+  const closeBtn = document.getElementById("column-panel-close");
+  const selectAllBtn = document.getElementById("column-panel-all");
+  const selectNoneBtn = document.getElementById("column-panel-none");
+  if (!panel || !groupsContainer || !toggleBtn) return;
+
+  const hidden = loadHiddenColumns();
+
+  const groups = new Map();
+  columnsCfg.forEach((col) => {
+    const groupName = col.group || "Other";
+    if (!groups.has(groupName)) groups.set(groupName, []);
+    groups.get(groupName).push(col);
+  });
+
+  groupsContainer.innerHTML = "";
+  const checkboxes = [];
+  groups.forEach((cols, groupName) => {
+    const details = document.createElement("details");
+    details.className = "column-panel__group";
+    details.open = true;
+
+    const summary = document.createElement("summary");
+    summary.textContent = groupName;
+    details.appendChild(summary);
+
+    const list = document.createElement("div");
+    list.className = "column-panel__list";
+    cols.forEach((col) => {
+      const label = document.createElement("label");
+      label.className = "column-panel__item";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !hidden.has(col.field);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          table.showColumn(col.field);
+          hidden.delete(col.field);
+        } else {
+          table.hideColumn(col.field);
+          hidden.add(col.field);
+        }
+        saveHiddenColumns(hidden);
+      });
+      checkboxes.push(checkbox);
+
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(col.title));
+      list.appendChild(label);
+    });
+
+    details.appendChild(list);
+    groupsContainer.appendChild(details);
+  });
+
+  // Apply whatever was hidden on a previous visit before the user opens the panel.
+  hidden.forEach((field) => {
+    if (table.getColumn(field)) table.hideColumn(field);
+  });
+
+  const openPanel = () => { panel.hidden = false; };
+  const closePanel = () => { panel.hidden = true; };
+  toggleBtn.addEventListener("click", () => (panel.hidden ? openPanel() : closePanel()));
+  closeBtn?.addEventListener("click", closePanel);
+
+  const setAll = (checked) => {
+    checkboxes.forEach((cb) => {
+      if (cb.checked !== checked) {
+        cb.checked = checked;
+        cb.dispatchEvent(new Event("change"));
+      }
+    });
+  };
+  selectAllBtn?.addEventListener("click", () => setAll(true));
+  selectNoneBtn?.addEventListener("click", () => setAll(false));
+}
+
+function setupTabs(tableByTab) {
+  // Tables built while their panel is still display:none get measured
+  // against a zero-width container by Tabulator — redraw once a panel is
+  // actually shown so it sizes correctly. Whichever tab starts active (see
+  // the `is-active` class in index.html) already rendered against a real
+  // width, so it's seeded into `redrawn` up front; every other tab needs a
+  // redraw the first time it's actually shown. Determined from the DOM
+  // rather than hardcoded, so this doesn't silently break again if the
+  // default tab changes.
+  const redrawn = new Set(
+    Object.keys(tableByTab).filter(
+      (name) => document.getElementById(`tab-${name}`)?.classList.contains("is-active")
+    )
+  );
 
   document.querySelectorAll(".tabs__btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1421,7 +1555,7 @@ async function main() {
 
   const table = new Tabulator("#property-table", {
     data: payload.rows,
-    columns: buildColumns(payload.columns),
+    columns: buildGroupedColumns(payload.columns),
     layout: "fitDataFill",
     height: "calc(100vh - 220px)",
     pagination: true,
@@ -1433,6 +1567,7 @@ async function main() {
 
   table.on("tableBuilt", () => {
     buildFilterControls(payload.rows, table);
+    createColumnPanel(table, payload.columns);
   });
   table.on("dataFiltered", () => updateRowCount(table, "row-count", "properties"));
   table.on("renderComplete", () => updateRowCount(table, "row-count", "properties"));
@@ -1457,7 +1592,7 @@ async function main() {
   const subdivisionTable = buildSubdivisionTab(payload);
   const suburbFinderTable = buildSuburbFinderTab(payload);
   buildDefinitionsTab(payload);
-  setupTabs(subdivisionTable, suburbFinderTable);
+  setupTabs({ datatable: table, subdivision: subdivisionTable, suburbfinder: suburbFinderTable });
 }
 
 main().catch((err) => {
