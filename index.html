@@ -34,6 +34,7 @@
         <button id="suburbfinder-save-strategy" class="btn btn--secondary">Save as Strategy</button>
       </div>
       <button id="suburbfinder-clear-filters" class="btn btn--ghost">Clear filters</button>
+      <button id="suburbfinder-column-panel-toggle" class="btn btn--secondary">Columns</button>
       <span id="suburbfinder-row-count" class="toolbar__count"></span>
     </section>
     <div id="suburbfinder-querybuilder" class="querybuilder"></div>
@@ -112,6 +113,18 @@
       <button id="column-panel-none" class="btn btn--ghost">Select none</button>
     </div>
     <div id="column-panel-groups" class="column-panel__groups"></div>
+  </aside>
+
+  <aside id="suburbfinder-column-panel" class="column-panel" hidden>
+    <div class="column-panel__header">
+      <h3>Columns</h3>
+      <button id="suburbfinder-column-panel-close" class="btn btn--ghost" aria-label="Close">✕</button>
+    </div>
+    <div class="column-panel__actions">
+      <button id="suburbfinder-column-panel-all" class="btn btn--ghost">Select all</button>
+      <button id="suburbfinder-column-panel-none" class="btn btn--ghost">Select none</button>
+    </div>
+    <div id="suburbfinder-column-panel-groups" class="column-panel__groups"></div>
   </aside>
 
   <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>

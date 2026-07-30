@@ -1292,8 +1292,7 @@ function formatPercentSigned(value) {
   return `${sign}${value.toFixed(1)}%`;
 }
 
-function buildSuburbFinderColumns(columnsCfg) {
-  return columnsCfg.map((col) => {
+function buildSuburbColumnDef(col) {
     const base = { field: col.field, title: col.title, headerFilter: false };
     if (SUBURB_MONEY_FIELDS.has(col.field)) {
       return { ...base, sorter: "number", formatter: (cell) => {
@@ -1330,7 +1329,23 @@ function buildSuburbFinderColumns(columnsCfg) {
     }
     if (col.field === "state") return { ...base, width: 80 };
     return { ...base, sorter: "number" };
+}
+
+// Same grouped-header wrapping as buildGroupedColumns (Data Table) — one
+// spanning parent header per `group` in config.yaml, in first-seen order.
+function buildGroupedSuburbColumns(columnsCfg) {
+  const groups = [];
+  const byName = new Map();
+  columnsCfg.forEach((col) => {
+    const groupName = col.group || "Other";
+    if (!byName.has(groupName)) {
+      const groupDef = { title: groupName, columns: [] };
+      byName.set(groupName, groupDef);
+      groups.push(groupDef);
+    }
+    byName.get(groupName).columns.push(buildSuburbColumnDef(col));
   });
+  return groups;
 }
 
 function buildSuburbFinderTab(payload) {
@@ -1339,7 +1354,7 @@ function buildSuburbFinderTab(payload) {
 
   const table = new Tabulator("#suburb-table", {
     data: suburbs.rows,
-    columns: buildSuburbFinderColumns(suburbs.columns),
+    columns: buildGroupedSuburbColumns(suburbs.columns),
     layout: "fitDataFill",
     height: "calc(100vh - 320px)",
     pagination: true,
@@ -1359,6 +1374,14 @@ function buildSuburbFinderTab(payload) {
   wireSaveStrategyButton(document.getElementById("suburbfinder-save-strategy"), qb);
   document.getElementById("suburbfinder-clear-filters").addEventListener("click", () => qb.clear());
 
+  table.on("tableBuilt", () => {
+    createColumnPanel(table, suburbs.columns, {
+      panel: "suburbfinder-column-panel", groups: "suburbfinder-column-panel-groups",
+      toggle: "suburbfinder-column-panel-toggle", close: "suburbfinder-column-panel-close",
+      selectAll: "suburbfinder-column-panel-all", selectNone: "suburbfinder-column-panel-none",
+      storageKey: "suburbfinder-hidden-columns",
+    });
+  });
   table.on("dataFiltered", () => updateRowCount(table, "suburbfinder-row-count", "suburbs"));
   table.on("renderComplete", () => updateRowCount(table, "suburbfinder-row-count", "suburbs"));
 
@@ -1400,38 +1423,39 @@ function buildDefinitionsTab(payload) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Column visibility panel (Data Table tab) — a right-hand slide-out panel,
 // grouped the same way as the table's own header groups (buildGroupedColumns
-// above), both driven by each column's `group` in config.yaml. Visibility
-// choices persist in localStorage so they survive a reload.
+// above), both driven by each column's `group` in config.yaml. Reused for
+// both Data Table and Suburb Finder (each with its own DOM ids and
+// localStorage key, passed in via `ids`) — same panel/grouping mechanics,
+// just pointed at a different table and column set. Visibility choices
+// persist in localStorage so they survive a reload.
 // ─────────────────────────────────────────────────────────────────────────────
-const COLUMN_VISIBILITY_STORAGE_KEY = "datatable-hidden-columns";
-
-function loadHiddenColumns() {
+function loadHiddenColumns(storageKey) {
   try {
-    const raw = localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     return raw ? new Set(JSON.parse(raw)) : new Set();
   } catch {
     return new Set();
   }
 }
 
-function saveHiddenColumns(hidden) {
+function saveHiddenColumns(hidden, storageKey) {
   try {
-    localStorage.setItem(COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify([...hidden]));
+    localStorage.setItem(storageKey, JSON.stringify([...hidden]));
   } catch {
     // localStorage unavailable (private browsing, full quota) — visibility choices just won't persist
   }
 }
 
-function createColumnPanel(table, columnsCfg) {
-  const panel = document.getElementById("column-panel");
-  const groupsContainer = document.getElementById("column-panel-groups");
-  const toggleBtn = document.getElementById("column-panel-toggle");
-  const closeBtn = document.getElementById("column-panel-close");
-  const selectAllBtn = document.getElementById("column-panel-all");
-  const selectNoneBtn = document.getElementById("column-panel-none");
+function createColumnPanel(table, columnsCfg, ids) {
+  const panel = document.getElementById(ids.panel);
+  const groupsContainer = document.getElementById(ids.groups);
+  const toggleBtn = document.getElementById(ids.toggle);
+  const closeBtn = document.getElementById(ids.close);
+  const selectAllBtn = document.getElementById(ids.selectAll);
+  const selectNoneBtn = document.getElementById(ids.selectNone);
   if (!panel || !groupsContainer || !toggleBtn) return;
 
-  const hidden = loadHiddenColumns();
+  const hidden = loadHiddenColumns(ids.storageKey);
 
   const groups = new Map();
   columnsCfg.forEach((col) => {
@@ -1468,7 +1492,7 @@ function createColumnPanel(table, columnsCfg) {
           table.hideColumn(col.field);
           hidden.add(col.field);
         }
-        saveHiddenColumns(hidden);
+        saveHiddenColumns(hidden, ids.storageKey);
       });
       checkboxes.push(checkbox);
 
@@ -1571,7 +1595,11 @@ async function main() {
 
   table.on("tableBuilt", () => {
     buildFilterControls(payload.rows, table);
-    createColumnPanel(table, payload.columns);
+    createColumnPanel(table, payload.columns, {
+      panel: "column-panel", groups: "column-panel-groups", toggle: "column-panel-toggle",
+      close: "column-panel-close", selectAll: "column-panel-all", selectNone: "column-panel-none",
+      storageKey: "datatable-hidden-columns",
+    });
   });
   table.on("dataFiltered", () => updateRowCount(table, "row-count", "properties"));
   table.on("renderComplete", () => updateRowCount(table, "row-count", "properties"));
