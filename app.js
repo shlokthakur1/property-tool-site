@@ -1257,24 +1257,31 @@ function createStrategiesPanel(container, qb) {
 // Subdivision, there's no live-adjustable re-aggregation, so a plain
 // table.setFilter is enough.
 // ─────────────────────────────────────────────────────────────────────────────
-const SUBURB_CATEGORICAL_FIELDS = new Set(["suburb", "state", "postcode", "zone", "data_confidence", "growth_rate_cycle"]);
+const SUBURB_CATEGORICAL_FIELDS = new Set([
+  "suburb", "state", "postcode", "zone", "data_confidence", "growth_rate_cycle_house", "growth_rate_cycle_unit",
+]);
 const SUBURB_MONEY_FIELDS = new Set([
-  "median_price", "non_res_building_approvals_value_fy", "infrastructure_spend_per_capita",
+  "non_res_building_approvals_value_fy", "infrastructure_spend_per_capita",
   "median_price_house", "median_price_unit",
 ]);
-const SUBURB_MONEY_PER_M2_FIELDS = new Set(["median_price_per_m2"]);
-const SUBURB_MONEY_PER_WEEK_FIELDS = new Set(["median_rent_weekly", "median_rent_weekly_house", "median_rent_weekly_unit"]);
+const SUBURB_MONEY_PER_M2_FIELDS = new Set(["median_price_per_m2_house", "median_price_per_m2_unit"]);
+const SUBURB_MONEY_PER_WEEK_FIELDS = new Set(["median_rent_weekly_house", "median_rent_weekly_unit"]);
 const SUBURB_KM_FIELDS = new Set(["distance_to_gpo_km"]);
 const SUBURB_PERCENT_SIGNED_FIELDS = new Set([
-  "sale_through_rate_pct", "price_spread_pct", "population_change_pct_1yr", "population_change_pct_5yr",
-  "price_growth_1mo_pct", "price_growth_6mo_pct", "price_growth_1yr_pct", "price_growth_2yr_pct",
-  "gross_rental_yield_pct", "gross_rental_yield_pct_house", "gross_rental_yield_pct_unit",
+  "sale_through_rate_pct", "population_change_pct_1yr", "population_change_pct_5yr",
+  "price_spread_pct_house", "price_spread_pct_unit",
+  "price_growth_1mo_pct_house", "price_growth_1mo_pct_unit",
+  "price_growth_6mo_pct_house", "price_growth_6mo_pct_unit",
+  "price_growth_1yr_pct_house", "price_growth_1yr_pct_unit",
+  "price_growth_2yr_pct_house", "price_growth_2yr_pct_unit",
+  "gross_rental_yield_pct_house", "gross_rental_yield_pct_unit",
 ]);
 const SUBURB_INT_FIELDS = new Set([
   "listing_count", "for_sale_count", "sold_recent_count", "subdivision_candidate_count",
-  "population_2025", "new_dwelling_approvals_fy", "median_land_size_m2", "median_min_lot_size_m2",
-  "rentals_count", "volatility_index", "rentals_count_house", "rentals_count_unit",
-  "sold_recent_count_house", "sold_recent_count_unit",
+  "population_2025", "new_dwelling_approvals_fy", "median_min_lot_size_m2",
+  "median_land_size_m2_house", "median_land_size_m2_unit",
+  "rentals_count_house", "rentals_count_unit", "sold_recent_count_house", "sold_recent_count_unit",
+  "volatility_index_house", "volatility_index_unit",
 ]);
 
 function buildSuburbFieldCatalog(columnsCfg, rows) {
