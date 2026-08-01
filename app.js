@@ -177,7 +177,9 @@ function buildColumnDef(col) {
       col.field === "mining_employment_pct" ||
       col.field === "top_industry_1_pct" ||
       col.field === "top_industry_2_pct" ||
-      col.field === "top_industry_3_pct"
+      col.field === "top_industry_3_pct" ||
+      col.field === "owner_occupied_pct" ||
+      col.field === "renter_pct"
     ) {
       return {
         ...base,
@@ -186,6 +188,17 @@ function buildColumnDef(col) {
         formatter: (cell) => {
           const value = cell.getValue();
           return value == null ? "" : `${value.toFixed(1)}%`;
+        },
+      };
+    }
+    if (col.field === "median_household_income_annual") {
+      return {
+        ...base,
+        sorter: "number",
+        hozAlign: "right",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          return value == null ? "" : `$${Math.round(value).toLocaleString()}`;
         },
       };
     }
@@ -256,7 +269,9 @@ function rowMatchesFilters(row) {
 }
 
 function closeAllPanels(except) {
-  document.querySelectorAll(".multiselect__panel.is-open, .strategies-dropdown__panel.is-open").forEach((panel) => {
+  document.querySelectorAll(
+    ".multiselect__panel.is-open, .strategies-dropdown__panel.is-open, .score-settings__panel.is-open"
+  ).forEach((panel) => {
     if (panel !== except) panel.classList.remove("is-open");
   });
 }
@@ -1175,9 +1190,41 @@ function qbRenderGroup(group, fieldCatalog, fieldMap, onChange, depth) {
   return el;
 }
 
+// Persists the CURRENTLY ACTIVE filter tree (distinct from named Saved
+// Strategies below) so it auto-restores on the next visit instead of
+// starting blank every session — one localStorage slot per persistKey, so
+// multiple tabs with their own query builder don't collide.
+function qbLoadLastState(persistKey) {
+  try {
+    const raw = localStorage.getItem(`propertyTool.lastFilter.${persistKey}.v1`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    console.error("Failed to read last filter state", err);
+    return null;
+  }
+}
+
+function qbSaveLastState(persistKey, group) {
+  try {
+    localStorage.setItem(`propertyTool.lastFilter.${persistKey}.v1`, JSON.stringify(group));
+  } catch (err) {
+    console.error("Failed to save last filter state", err);
+  }
+}
+
 function createQueryBuilder(container, fieldCatalog, options) {
   const fieldMap = new Map(fieldCatalog.map((f) => [f.field, f]));
-  let root = qbNewGroup("AND", []);
+  const persistKey = options.persistKey;
+  let root = null;
+  if (persistKey) {
+    const restored = qbLoadLastState(persistKey);
+    if (restored) {
+      qbPruneToFields(restored, fieldMap);
+      qbFlatten(restored);
+      root = restored;
+    }
+  }
+  if (!root) root = qbNewGroup("AND", []);
 
   function render() {
     container.innerHTML = "";
@@ -1186,6 +1233,7 @@ function createQueryBuilder(container, fieldCatalog, options) {
 
   function handleChange(rerender) {
     if (rerender !== false) render();
+    if (persistKey) qbSaveLastState(persistKey, root);
     options.onFilterChange();
   }
 
@@ -1196,11 +1244,13 @@ function createQueryBuilder(container, fieldCatalog, options) {
     setGroup: (newGroup) => {
       root = newGroup;
       render();
+      if (persistKey) qbSaveLastState(persistKey, root);
       options.onFilterChange();
     },
     clear: () => {
       root = qbNewGroup("AND", []);
       render();
+      if (persistKey) qbSaveLastState(persistKey, root);
       options.onFilterChange();
     },
     matches: (row) => qbGroupMatches(row, root, fieldMap),
@@ -1438,11 +1488,25 @@ function buildSuburbColumnDef(col) {
       col.field === "mining_employment_pct" ||
       col.field === "top_industry_1_pct" ||
       col.field === "top_industry_2_pct" ||
-      col.field === "top_industry_3_pct"
+      col.field === "top_industry_3_pct" ||
+      col.field === "owner_occupied_pct" ||
+      col.field === "renter_pct"
     ) {
       return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : `${v.toFixed(1)}%`;
+      } };
+    }
+    if (col.field === "median_household_income_annual") {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `$${Math.round(v).toLocaleString()}`;
+      } };
+    }
+    if (col.field === "affordability_index_house" || col.field === "affordability_index_unit") {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `${v.toFixed(1)}x`;
       } };
     }
     if (col.field === "state") return { ...base, width: 80 };
@@ -1471,13 +1535,255 @@ function buildGroupedSuburbColumns(columnsCfg) {
   return groups;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Suburb comparison — pick up to MAX_COMPARE_SUBURBS rows in the Suburb
+// Finder table (Tabulator's own row selection, not a bespoke checkbox
+// column) and view every suburb_columns metric for them side by side,
+// grouped the same way as the table's own header groups. Reuses
+// buildSuburbColumnDef's formatters directly (passing a minimal fake
+// CellComponent) rather than re-implementing money/percent/etc. formatting
+// a second time.
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_COMPARE_SUBURBS = 6;
+
+function compareFormatValue(columnsCfg, field, value) {
+  if (value == null || value === "") return "—";
+  const col = columnsCfg.find((c) => c.field === field);
+  const colDef = buildSuburbColumnDef(col || { field, title: field });
+  if (typeof colDef.formatter === "function") {
+    const rendered = colDef.formatter({ getValue: () => value });
+    return rendered === "" ? "—" : rendered;
+  }
+  return String(value);
+}
+
+function buildCompareTable(rows, columnsCfg) {
+  const groups = [];
+  const byName = new Map();
+  columnsCfg.forEach((col) => {
+    if (!byName.has(col.group)) {
+      const g = { name: col.group || "Other", cols: [] };
+      byName.set(col.group, g);
+      groups.push(g);
+    }
+    byName.get(col.group).cols.push(col);
+  });
+
+  const thead = `
+    <tr>
+      <th>Metric</th>
+      ${rows.map((r) => `<th>${r.suburb}, ${r.state}</th>`).join("")}
+    </tr>
+  `;
+
+  const body = groups.map((g) => `
+    <tr class="compare-group-row"><th colspan="${rows.length + 1}">${g.name}</th></tr>
+    ${g.cols.map((col) => `
+      <tr>
+        <th>${col.title}</th>
+        ${rows.map((r) => `<td>${compareFormatValue(columnsCfg, col.field, r[col.field])}</td>`).join("")}
+      </tr>
+    `).join("")}
+  `).join("");
+
+  return `
+    <div class="compare-table-scroll">
+      <table class="compare-table">
+        <thead>${thead}</thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function wireCompareFeature(table, columnsCfg) {
+  const toggleBtn = document.getElementById("suburbfinder-compare-toggle");
+  const modal = document.getElementById("compare-modal");
+  const modalBody = document.getElementById("compare-modal-body");
+  const closeBtn = document.getElementById("compare-modal-close");
+
+  table.on("rowSelectionChanged", (data) => {
+    toggleBtn.textContent = `Compare (${data.length})`;
+    toggleBtn.disabled = data.length < 2;
+  });
+
+  toggleBtn.addEventListener("click", () => {
+    const selected = table.getSelectedData();
+    modalBody.innerHTML = buildCompareTable(selected, columnsCfg);
+    modal.hidden = false;
+  });
+
+  const close = () => { modal.hidden = true; };
+  closeBtn.addEventListener("click", close);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Investment Score — deliberately NOT a black-box number. Every component is
+// a real column already visible elsewhere in this app, normalised to a 0-100
+// percentile rank against every other suburb (so a 5% yield means the same
+// thing regardless of the raw metric's units), then combined as a weighted
+// average using weights the user sets themselves (persisted, defaulting to
+// an even-ish split) — see the "Score weights" panel. A suburb missing one
+// component (e.g. no IRSAD match) just has that component skipped and the
+// remaining weights renormalised, rather than being penalised for missing data.
+// ─────────────────────────────────────────────────────────────────────────────
+const SCORE_COMPONENTS = [
+  { key: "yield", field: "gross_rental_yield_pct_house", label: "Rental yield (House)", direction: 1, defaultWeight: 25 },
+  { key: "growth", field: "price_growth_1yr_pct_house", label: "Price growth 1yr (House)", direction: 1, defaultWeight: 25 },
+  { key: "popGrowth", field: "population_change_pct_5yr", label: "Population growth (5yr)", direction: 1, defaultWeight: 15 },
+  { key: "irsad", field: "irsad_aus_decile", label: "IRSAD decile", direction: 1, defaultWeight: 15 },
+  { key: "supply", field: "months_of_supply", label: "Months of supply (lower = tighter market)", direction: -1, defaultWeight: 10 },
+  { key: "afford", field: "affordability_index_house", label: "Affordability Index (lower = more affordable)", direction: -1, defaultWeight: 10 },
+];
+const SCORE_WEIGHTS_STORAGE_KEY = "propertyTool.investmentScoreWeights.v1";
+
+function loadScoreWeights() {
+  const defaults = {};
+  SCORE_COMPONENTS.forEach((c) => (defaults[c.key] = c.defaultWeight));
+  try {
+    const raw = localStorage.getItem(SCORE_WEIGHTS_STORAGE_KEY);
+    return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+  } catch {
+    return defaults;
+  }
+}
+
+function saveScoreWeights(weights) {
+  try {
+    localStorage.setItem(SCORE_WEIGHTS_STORAGE_KEY, JSON.stringify(weights));
+  } catch {
+    // localStorage unavailable — weights just won't persist across reloads
+  }
+}
+
+// Percentile rank (0-100) of each value within its own component's
+// distribution, direction-adjusted so "100" always means "favourable for
+// this score" regardless of whether the raw metric is better high or low.
+function computePercentileRanks(rows) {
+  const ranks = new Map(); // field -> Map(rowIndex -> percentile 0-100)
+  SCORE_COMPONENTS.forEach(({ field, direction }) => {
+    const withValue = rows
+      .map((row, i) => ({ i, v: row[field] }))
+      .filter((r) => r.v != null && !Number.isNaN(r.v));
+    withValue.sort((a, b) => a.v - b.v);
+    const n = withValue.length;
+    const fieldRanks = new Map();
+    withValue.forEach((r, sortedIndex) => {
+      const pct = n <= 1 ? 100 : (sortedIndex / (n - 1)) * 100;
+      fieldRanks.set(r.i, direction === 1 ? pct : 100 - pct);
+    });
+    ranks.set(field, fieldRanks);
+  });
+  return ranks;
+}
+
+function computeInvestmentScores(rows, ranks, weights) {
+  rows.forEach((row, i) => {
+    let weightedSum = 0;
+    let totalWeight = 0;
+    SCORE_COMPONENTS.forEach(({ key, field }) => {
+      const pct = ranks.get(field).get(i);
+      if (pct == null) return;
+      const w = Math.max(0, Number(weights[key]) || 0);
+      weightedSum += pct * w;
+      totalWeight += w;
+    });
+    row.investmentScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : null;
+  });
+}
+
+function createScoreSettingsPanel(toggleBtn, panel, weights, onChange) {
+  function render() {
+    panel.innerHTML = "";
+    const intro = document.createElement("p");
+    intro.className = "score-settings__intro";
+    intro.textContent = "Investment Score blends these columns (each ranked 0-100 against every other suburb) using the weights below — adjust to match what you actually care about. Set a weight to 0 to drop a component entirely.";
+    panel.appendChild(intro);
+
+    SCORE_COMPONENTS.forEach(({ key, label }) => {
+      const row = document.createElement("div");
+      row.className = "score-settings__row";
+
+      const labelEl = document.createElement("label");
+      labelEl.textContent = label;
+      labelEl.htmlFor = `score-weight-${key}`;
+
+      const input = document.createElement("input");
+      input.type = "range";
+      input.id = `score-weight-${key}`;
+      input.min = "0";
+      input.max = "100";
+      input.value = weights[key];
+
+      const output = document.createElement("output");
+      output.textContent = weights[key];
+
+      input.addEventListener("input", debounce(() => {
+        weights[key] = Number(input.value);
+        output.textContent = input.value;
+        saveScoreWeights(weights);
+        onChange();
+      }, 150));
+      input.addEventListener("input", () => { output.textContent = input.value; });
+
+      row.appendChild(labelEl);
+      row.appendChild(input);
+      row.appendChild(output);
+      panel.appendChild(row);
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "score-settings__actions";
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "btn btn--ghost";
+    resetBtn.textContent = "Reset to defaults";
+    resetBtn.addEventListener("click", () => {
+      SCORE_COMPONENTS.forEach((c) => (weights[c.key] = c.defaultWeight));
+      saveScoreWeights(weights);
+      render();
+      onChange();
+    });
+    actions.appendChild(resetBtn);
+    panel.appendChild(actions);
+  }
+
+  render();
+  toggleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = panel.classList.contains("is-open");
+    closeAllPanels();
+    if (!isOpen) panel.classList.add("is-open");
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => panel.classList.remove("is-open"));
+}
+
 function buildSuburbFinderTab(payload) {
   const suburbs = payload.suburbs;
   if (!suburbs) return null;
 
+  const scoreWeights = loadScoreWeights();
+  const scoreRanks = computePercentileRanks(suburbs.rows);
+  computeInvestmentScores(suburbs.rows, scoreRanks, scoreWeights);
+
+  const scoreColumn = {
+    title: "Investment Score",
+    columns: [{
+      field: "investmentScore", title: "Score", sorter: "number", hozAlign: "right", width: 90,
+      formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : String(v);
+      },
+    }],
+  };
+
   const table = new Tabulator("#suburb-table", {
     data: suburbs.rows,
-    columns: buildGroupedSuburbColumns(suburbs.columns),
+    columns: [scoreColumn, ...buildGroupedSuburbColumns(suburbs.columns)],
     layout: "fitDataFill",
     height: "calc(100vh - 360px)",
     pagination: true,
@@ -1486,16 +1792,37 @@ function buildSuburbFinderTab(payload) {
     paginationSizeSelector: [25, 50, 100, 250, 500],
     initialSort: [{ column: "median_price", dir: "desc" }],
     placeholder: "No suburbs match these filters",
+    selectableRows: MAX_COMPARE_SUBURBS,
   });
+
+  createScoreSettingsPanel(
+    document.getElementById("suburbfinder-score-toggle"),
+    document.getElementById("suburbfinder-score-panel"),
+    scoreWeights,
+    () => {
+      // Mutates the same row objects Tabulator already holds as `data`, so a
+      // forced redraw (not setData/updateData, which need an id-keyed match)
+      // is enough to re-render the new Investment Score values.
+      computeInvestmentScores(suburbs.rows, scoreRanks, scoreWeights);
+      table.redraw(true);
+    }
+  );
 
   const fieldCatalog = buildSuburbFieldCatalog(suburbs.columns, suburbs.rows);
   const qb = createQueryBuilder(document.getElementById("suburbfinder-querybuilder"), fieldCatalog, {
+    persistKey: "suburbfinder",
     onFilterChange: () => table.setFilter((row) => qb.matches(row)),
   });
+  // Apply whatever was restored from localStorage (or the still-empty
+  // default) once up front — createQueryBuilder can't safely call
+  // onFilterChange during its own construction (this closure captures `qb`,
+  // which isn't assigned yet while `createQueryBuilder(...)` is still running).
+  table.setFilter((row) => qb.matches(row));
 
   createStrategiesPanel(document.getElementById("suburbfinder-strategies"), qb);
   wireSaveStrategyButton(document.getElementById("suburbfinder-save-strategy"), qb);
   document.getElementById("suburbfinder-clear-filters").addEventListener("click", () => qb.clear());
+  wireCompareFeature(table, suburbs.columns);
 
   table.on("tableBuilt", () => {
     createColumnPanel(table, suburbs.columns, {
@@ -1650,6 +1977,225 @@ function createColumnPanel(table, columnsCfg, ids) {
   selectNoneBtn?.addEventListener("click", () => setAll(false));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cashflow tab — a single-property loan/rental cashflow model with a 30-year
+// projection, plus a small localStorage-backed "portfolio" of saved
+// scenarios. Standard principal & interest amortisation; rent and expenses
+// held flat in nominal terms (not grown with inflation) — a deliberately
+// conservative simplification, not a full inflation model. Once the loan
+// balance reaches zero (only reachable if loan term < 30yr) that year's
+// repayment is dropped from cashflow for the remainder of the projection.
+// ─────────────────────────────────────────────────────────────────────────────
+function computeCashflow(inputs) {
+  const price = Math.max(0, inputs.price || 0);
+  const loanTermYears = Math.max(1, inputs.loanTermYears || 30);
+  const depositPct = inputs.depositPct ?? 20;
+  const interestRatePct = inputs.interestRatePct ?? 6;
+  const stampDutyPct = inputs.stampDutyPct ?? 5;
+  const weeklyRent = Math.max(0, inputs.weeklyRent || 0);
+  const vacancyPct = inputs.vacancyPct ?? 3;
+  const mgmtPct = inputs.mgmtPct ?? 7;
+  const otherExpensesAnnual = Math.max(0, inputs.otherExpensesAnnual || 0);
+  const growthPct = inputs.growthPct ?? 4;
+
+  const deposit = price * (depositPct / 100);
+  const stampDuty = price * (stampDutyPct / 100);
+  const loanAmount = Math.max(0, price - deposit);
+  const upfrontCosts = deposit + stampDuty;
+
+  const monthlyRate = (interestRatePct / 100) / 12;
+  const numPayments = loanTermYears * 12;
+  const monthlyRepayment = monthlyRate > 0
+    ? loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1)
+    : loanAmount / numPayments;
+  const annualLoanRepayment = monthlyRepayment * 12;
+  const weeklyRepayment = annualLoanRepayment / 52;
+
+  const grossAnnualRent = weeklyRent * 52 * (1 - vacancyPct / 100);
+  const managementCost = grossAnnualRent * (mgmtPct / 100);
+  const netAnnualCashflow = grossAnnualRent - managementCost - otherExpensesAnnual - annualLoanRepayment;
+  const netWeeklyCashflow = netAnnualCashflow / 52;
+  const cashOnCashReturnPct = upfrontCosts > 0 ? (netAnnualCashflow / upfrontCosts) * 100 : null;
+
+  const projection = [];
+  let loanBalance = loanAmount;
+  let propertyValue = price;
+  let cumulativeCashflow = 0;
+  for (let year = 1; year <= 30; year++) {
+    for (let m = 0; m < 12 && loanBalance > 0; m++) {
+      const interestPortion = loanBalance * monthlyRate;
+      const principalPortion = Math.min(loanBalance, monthlyRepayment - interestPortion);
+      loanBalance = Math.max(0, loanBalance - principalPortion);
+    }
+    propertyValue *= 1 + growthPct / 100;
+    const loanStillActive = loanBalance > 0;
+    const annualCashflowThisYear = grossAnnualRent - managementCost - otherExpensesAnnual - (loanStillActive ? annualLoanRepayment : 0);
+    cumulativeCashflow += annualCashflowThisYear;
+    projection.push({
+      year, propertyValue, loanBalance, equity: propertyValue - loanBalance,
+      annualCashflow: annualCashflowThisYear, cumulativeCashflow,
+    });
+  }
+
+  return {
+    deposit, stampDuty, loanAmount, upfrontCosts, monthlyRepayment, weeklyRepayment,
+    grossAnnualRent, managementCost, netAnnualCashflow, netWeeklyCashflow, cashOnCashReturnPct,
+    projection,
+  };
+}
+
+function cfMoney(value, decimals = 0) {
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+}
+
+function cfReadInputs() {
+  return {
+    price: Number(document.getElementById("cf-price").value),
+    depositPct: Number(document.getElementById("cf-deposit-pct").value),
+    interestRatePct: Number(document.getElementById("cf-interest-rate").value),
+    loanTermYears: Number(document.getElementById("cf-loan-term").value),
+    stampDutyPct: Number(document.getElementById("cf-stamp-duty-pct").value),
+    weeklyRent: Number(document.getElementById("cf-weekly-rent").value),
+    vacancyPct: Number(document.getElementById("cf-vacancy-pct").value),
+    mgmtPct: Number(document.getElementById("cf-mgmt-pct").value),
+    otherExpensesAnnual: Number(document.getElementById("cf-other-expenses").value),
+    growthPct: Number(document.getElementById("cf-growth-pct").value),
+  };
+}
+
+function cfRenderSummary(result) {
+  const container = document.getElementById("cf-summary");
+  const stat = (label, value, cls) => `
+    <div class="cashflow-stat">
+      <span class="cashflow-stat__label">${label}</span>
+      <span class="cashflow-stat__value${cls ? ` ${cls}` : ""}">${value}</span>
+    </div>
+  `;
+  const cashflowCls = result.netWeeklyCashflow >= 0 ? "is-positive" : "is-negative";
+  container.innerHTML = [
+    stat("Loan amount", cfMoney(result.loanAmount)),
+    stat("Upfront cost (deposit + stamp duty)", cfMoney(result.upfrontCosts)),
+    stat("Loan repayment /week", cfMoney(result.weeklyRepayment)),
+    stat("Gross rent /year (after vacancy)", cfMoney(result.grossAnnualRent)),
+    stat("Net cashflow /week", cfMoney(result.netWeeklyCashflow), cashflowCls),
+    stat("Net cashflow /year", cfMoney(result.netAnnualCashflow), cashflowCls),
+    stat("Cash-on-cash return", result.cashOnCashReturnPct == null ? "—" : `${result.cashOnCashReturnPct.toFixed(1)}%`),
+    stat("Equity after 10yr", cfMoney(result.projection[9].equity)),
+    stat("Equity after 30yr", cfMoney(result.projection[29].equity)),
+  ].join("");
+}
+
+function cfRenderProjection(result) {
+  const tbody = document.getElementById("cf-projection-body");
+  tbody.innerHTML = result.projection.map((row) => `
+    <tr>
+      <td>${row.year}</td>
+      <td>${cfMoney(row.propertyValue)}</td>
+      <td>${cfMoney(row.loanBalance)}</td>
+      <td>${cfMoney(row.equity)}</td>
+      <td>${cfMoney(row.annualCashflow)}</td>
+      <td>${cfMoney(row.cumulativeCashflow)}</td>
+    </tr>
+  `).join("");
+}
+
+const CF_SCENARIOS_STORAGE_KEY = "propertyTool.cashflowScenarios.v1";
+
+function cfLoadScenarios() {
+  try {
+    const raw = localStorage.getItem(CF_SCENARIOS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function cfSaveScenarios(list) {
+  try {
+    localStorage.setItem(CF_SCENARIOS_STORAGE_KEY, JSON.stringify(list));
+  } catch {
+    // localStorage unavailable — scenarios just won't persist
+  }
+}
+
+function cfRenderScenarios(onLoad) {
+  const container = document.getElementById("cf-scenarios-list");
+  const scenarios = cfLoadScenarios();
+  if (!scenarios.length) {
+    container.innerHTML = '<p class="cashflow-scenarios-empty">No saved scenarios yet — set up a property above and click "Save scenario".</p>';
+    return;
+  }
+  container.innerHTML = "";
+  scenarios.forEach((s) => {
+    const result = computeCashflow(s.inputs);
+    const card = document.createElement("div");
+    card.className = "cashflow-scenario-card";
+    card.innerHTML = `
+      <div>
+        <div class="cashflow-scenario-card__name">${s.name}</div>
+        <div class="cashflow-scenario-card__meta">
+          ${cfMoney(s.inputs.price)} · net ${cfMoney(result.netWeeklyCashflow)}/wk ·
+          ${result.cashOnCashReturnPct == null ? "—" : `${result.cashOnCashReturnPct.toFixed(1)}% cash-on-cash`}
+        </div>
+      </div>
+      <div class="cashflow-scenario-card__actions">
+        <button type="button" class="btn btn--secondary" data-action="load">Load</button>
+        <button type="button" class="btn btn--ghost" data-action="delete">Delete</button>
+      </div>
+    `;
+    card.querySelector('[data-action="load"]').addEventListener("click", () => onLoad(s.inputs));
+    card.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      cfSaveScenarios(cfLoadScenarios().filter((x) => x.id !== s.id));
+      cfRenderScenarios(onLoad);
+    });
+    container.appendChild(card);
+  });
+}
+
+function buildCashflowTab() {
+  const fields = [
+    "cf-price", "cf-deposit-pct", "cf-interest-rate", "cf-loan-term", "cf-stamp-duty-pct",
+    "cf-weekly-rent", "cf-vacancy-pct", "cf-mgmt-pct", "cf-other-expenses", "cf-growth-pct",
+  ];
+
+  function recompute() {
+    const result = computeCashflow(cfReadInputs());
+    cfRenderSummary(result);
+    cfRenderProjection(result);
+  }
+
+  fields.forEach((id) => {
+    document.getElementById(id).addEventListener("input", debounce(recompute, 200));
+  });
+
+  function loadInputs(inputs) {
+    document.getElementById("cf-price").value = inputs.price;
+    document.getElementById("cf-deposit-pct").value = inputs.depositPct;
+    document.getElementById("cf-interest-rate").value = inputs.interestRatePct;
+    document.getElementById("cf-loan-term").value = inputs.loanTermYears;
+    document.getElementById("cf-stamp-duty-pct").value = inputs.stampDutyPct;
+    document.getElementById("cf-weekly-rent").value = inputs.weeklyRent;
+    document.getElementById("cf-vacancy-pct").value = inputs.vacancyPct;
+    document.getElementById("cf-mgmt-pct").value = inputs.mgmtPct;
+    document.getElementById("cf-other-expenses").value = inputs.otherExpensesAnnual;
+    document.getElementById("cf-growth-pct").value = inputs.growthPct;
+    recompute();
+  }
+
+  document.getElementById("cf-save-scenario").addEventListener("click", () => {
+    const nameInput = document.getElementById("cf-scenario-name");
+    const name = nameInput.value.trim() || `Scenario ${cfLoadScenarios().length + 1}`;
+    const scenarios = cfLoadScenarios();
+    scenarios.push({ id: `cf-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, name, inputs: cfReadInputs() });
+    cfSaveScenarios(scenarios);
+    nameInput.value = "";
+    cfRenderScenarios(loadInputs);
+  });
+
+  recompute();
+  cfRenderScenarios(loadInputs);
+}
+
 function setupTabs(tableByTab) {
   // Tables built while their panel is still display:none get measured
   // against a zero-width container by Tabulator — redraw once a panel is
@@ -1746,6 +2292,7 @@ async function main() {
 
   const subdivisionTable = buildSubdivisionTab(payload);
   const suburbFinderTable = buildSuburbFinderTab(payload);
+  buildCashflowTab();
   buildDefinitionsTab(payload);
   setupTabs({ datatable: table, subdivision: subdivisionTable, suburbfinder: suburbFinderTable });
 }

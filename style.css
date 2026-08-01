@@ -466,6 +466,81 @@ a:hover {
   box-shadow: var(--shadow-modal);
 }
 
+.modal-dialog--wide {
+  width: min(1100px, 92vw);
+}
+
+/* Suburb comparison table (Suburb Finder — Compare) */
+.compare-table-scroll {
+  overflow-x: auto;
+}
+
+.compare-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 13px;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.compare-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  z-index: 1;
+}
+
+.compare-table thead th:first-child {
+  z-index: 2;
+}
+
+.compare-table tbody th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+}
+
+.compare-table tbody td {
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-table tbody tr:nth-child(even) td,
+.compare-table tbody tr:nth-child(even) th {
+  background: var(--zebra);
+}
+
+.compare-table .compare-group-row th {
+  background: var(--group-band);
+  color: var(--group-band-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+}
+
+.compare-table td.compare-remove {
+  text-align: center;
+  color: var(--text-faint);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.compare-table td.compare-remove:hover {
+  color: var(--danger);
+}
+
 .modal-header {
   display: flex;
   align-items: flex-start;
@@ -728,6 +803,262 @@ a:hover {
 
 .strategies-dropdown__empty {
   margin: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Investment Score weight settings (Suburb Finder toolbar) */
+.score-settings {
+  position: relative;
+}
+
+.score-settings__panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: 360px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-dropdown);
+  padding: 14px;
+}
+
+.score-settings__panel.is-open {
+  display: block;
+}
+
+.score-settings__intro {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.score-settings__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.score-settings__row label {
+  flex: 1 1 auto;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.score-settings__row input[type="range"] {
+  flex: 0 0 120px;
+}
+
+.score-settings__row output {
+  flex: 0 0 34px;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.score-settings__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+/* Cashflow tab */
+.cashflow-layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 20px;
+  padding: 18px 24px;
+  align-items: start;
+}
+
+.cashflow-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cashflow-inputs__group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #fdfcff;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cashflow-inputs__group h4 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cashflow-inputs__group label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.cashflow-inputs__group input {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  font-family: var(--font-family);
+  color: var(--text);
+}
+
+.cashflow-outputs {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 16px 18px;
+}
+
+.cashflow-outputs h4,
+.cashflow-projection-wrap h4,
+.cashflow-scenarios h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cashflow-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.cashflow-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cashflow-stat__label {
+  font-size: 11px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.cashflow-stat__value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cashflow-stat__value.is-positive { color: var(--success); }
+.cashflow-stat__value.is-negative { color: var(--danger); }
+
+.cashflow-save {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.cashflow-save input {
+  flex: 1 1 auto;
+}
+
+.cashflow-projection-wrap,
+.cashflow-scenarios {
+  padding: 0 24px 24px;
+}
+
+.cashflow-table-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.cashflow-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 13px;
+}
+
+.cashflow-table th,
+.cashflow-table td {
+  padding: 8px 16px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cashflow-table th:first-child,
+.cashflow-table td:first-child {
+  text-align: left;
+}
+
+.cashflow-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--group-band);
+  color: var(--group-band-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.cashflow-table tbody tr:nth-child(even) td {
+  background: var(--zebra);
+}
+
+.cashflow-scenario-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background: #fdfcff;
+}
+
+.cashflow-scenario-card__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cashflow-scenario-card__meta {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.cashflow-scenario-card__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cashflow-scenarios-empty {
   font-size: 13px;
   color: var(--text-muted);
 }
