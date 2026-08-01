@@ -1596,11 +1596,22 @@ function buildCompareTable(rows, columnsCfg) {
   `;
 }
 
-function wireCompareFeature(table, columnsCfg) {
-  const toggleBtn = document.getElementById("suburbfinder-compare-toggle");
+// One shared modal, reused by every table that wires up compare (Explore
+// suburbs, Shortlist) — only one can be open at a time anyway.
+function wireCompareModalClose() {
+  const modal = document.getElementById("compare-modal");
+  const closeBtn = document.getElementById("compare-modal-close");
+  const close = () => { modal.hidden = true; };
+  closeBtn.addEventListener("click", close);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+}
+
+function wireCompareFeature(table, columnsCfg, toggleBtnId) {
+  const toggleBtn = document.getElementById(toggleBtnId);
   const modal = document.getElementById("compare-modal");
   const modalBody = document.getElementById("compare-modal-body");
-  const closeBtn = document.getElementById("compare-modal-close");
 
   table.on("rowSelectionChanged", (data) => {
     toggleBtn.textContent = `Compare (${data.length})`;
@@ -1612,12 +1623,17 @@ function wireCompareFeature(table, columnsCfg) {
     modalBody.innerHTML = buildCompareTable(selected, columnsCfg);
     modal.hidden = false;
   });
+}
 
-  const close = () => { modal.hidden = true; };
-  closeBtn.addEventListener("click", close);
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) close();
-  });
+// Explicit checkbox column for row selection (Compare / Add to Shortlist /
+// Remove from Shortlist) — not relying on "click anywhere on the row",
+// which is easy to miss as a selection affordance and, before this, had no
+// visible feedback at all (see the .tabulator-selected CSS fix).
+function buildSelectionColumn() {
+  return {
+    formatter: "rowSelection", titleFormatter: "rowSelection",
+    hozAlign: "center", headerSort: false, width: 40,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1762,6 +1778,171 @@ function createScoreSettingsPanel(toggleBtn, panel, weights, onChange) {
   document.addEventListener("click", () => panel.classList.remove("is-open"));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shortlist — suburbs explicitly added via "Add to Shortlist" in Explore
+// suburbs, shown in their own sub-tab deliberately NOT subject to Explore's
+// query-builder filter (a curated shortlist shouldn't silently shrink
+// because of leftover filter state elsewhere). The "active" shortlist is one
+// working Set persisted continuously; "Save as Shortlist" snapshots it under
+// a name (mirrors Saved Strategies) so more than one can exist and be
+// swapped back in via "Load Shortlist".
+// ─────────────────────────────────────────────────────────────────────────────
+const SHORTLIST_ACTIVE_STORAGE_KEY = "propertyTool.activeShortlist.v1";
+const SHORTLIST_SAVED_STORAGE_KEY = "propertyTool.savedShortlists.v1";
+
+function suburbKey(row) {
+  return `${row.suburb}||${row.state}`;
+}
+
+function loadActiveShortlist() {
+  try {
+    const raw = localStorage.getItem(SHORTLIST_ACTIVE_STORAGE_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveActiveShortlist(keys) {
+  try {
+    localStorage.setItem(SHORTLIST_ACTIVE_STORAGE_KEY, JSON.stringify(Array.from(keys)));
+  } catch {
+    // localStorage unavailable — active shortlist just won't persist
+  }
+}
+
+function loadSavedShortlists() {
+  try {
+    const raw = localStorage.getItem(SHORTLIST_SAVED_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSavedShortlists(list) {
+  try {
+    localStorage.setItem(SHORTLIST_SAVED_STORAGE_KEY, JSON.stringify(list));
+  } catch {
+    // localStorage unavailable — saved shortlists just won't persist
+  }
+}
+
+function createShortlistsPanel(container, onLoad) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "strategies-dropdown";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "btn btn--secondary strategies-dropdown__toggle";
+  toggle.textContent = "Load Shortlist";
+  wrapper.appendChild(toggle);
+
+  const panel = document.createElement("div");
+  panel.className = "strategies-dropdown__panel";
+
+  function renderList() {
+    const shortlists = loadSavedShortlists();
+    panel.innerHTML = "";
+    if (!shortlists.length) {
+      const empty = document.createElement("p");
+      empty.className = "strategies-dropdown__empty";
+      empty.textContent = "No saved shortlists yet.";
+      panel.appendChild(empty);
+      return;
+    }
+    shortlists.forEach((s) => {
+      const item = document.createElement("div");
+      item.className = "strategy-item";
+
+      const nameBtn = document.createElement("button");
+      nameBtn.type = "button";
+      nameBtn.className = "strategy-item__name";
+      nameBtn.textContent = `${s.name} (${s.suburbKeys.length})`;
+      nameBtn.title = `Saved ${new Date(s.createdAt).toLocaleString()}`;
+      nameBtn.addEventListener("click", () => {
+        onLoad(new Set(s.suburbKeys));
+        panel.classList.remove("is-open");
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "strategy-item__delete";
+      deleteBtn.textContent = "×";
+      deleteBtn.title = "Delete this saved shortlist";
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        saveSavedShortlists(loadSavedShortlists().filter((x) => x.id !== s.id));
+        renderList();
+      });
+
+      item.appendChild(nameBtn);
+      item.appendChild(deleteBtn);
+      panel.appendChild(item);
+    });
+  }
+
+  toggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = panel.classList.contains("is-open");
+    closeAllPanels();
+    if (!isOpen) {
+      renderList();
+      panel.classList.add("is-open");
+    }
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+
+  wrapper.appendChild(panel);
+  container.appendChild(wrapper);
+}
+
+function wireSaveShortlistButton(button, getActiveKeys) {
+  button.addEventListener("click", () => {
+    const keys = getActiveKeys();
+    if (!keys.size) {
+      alert("Add at least one suburb to the shortlist before saving it under a name.");
+      return;
+    }
+    const name = prompt("Save this shortlist as:", `Shortlist ${loadSavedShortlists().length + 1}`);
+    if (!name) return;
+    const shortlists = loadSavedShortlists();
+    shortlists.push({
+      id: `shortlist-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      name,
+      createdAt: new Date().toISOString(),
+      suburbKeys: Array.from(keys),
+    });
+    saveSavedShortlists(shortlists);
+  });
+}
+
+// Mirrors setupTabs, scoped to one nested .subtabs group instead of the
+// top-level .tabs bar (a Tabulator table built while its panel is still
+// display:none needs a redraw once actually shown, same reasoning as the
+// top-level tabs).
+function setupSubTabs(rootEl, tableByName) {
+  const redrawn = new Set(
+    Object.keys(tableByName).filter(
+      (name) => document.getElementById(`subtab-${name}`)?.classList.contains("is-active")
+    )
+  );
+  rootEl.querySelectorAll(".subtabs__btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      rootEl.querySelectorAll(".subtabs__btn").forEach((b) => b.classList.remove("is-active"));
+      rootEl.querySelectorAll(".subtab-panel").forEach((p) => p.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      document.getElementById(`subtab-${btn.dataset.subtab}`).classList.add("is-active");
+
+      const table = tableByName[btn.dataset.subtab];
+      if (table && !redrawn.has(btn.dataset.subtab)) {
+        redrawn.add(btn.dataset.subtab);
+        table.redraw(true);
+      }
+    });
+  });
+}
+
 function buildSuburbFinderTab(payload) {
   const suburbs = payload.suburbs;
   if (!suburbs) return null;
@@ -1770,22 +1951,32 @@ function buildSuburbFinderTab(payload) {
   const scoreRanks = computePercentileRanks(suburbs.rows);
   computeInvestmentScores(suburbs.rows, scoreRanks, scoreWeights);
 
-  const scoreColumn = {
-    title: "Investment Score",
-    columns: [{
-      field: "investmentScore", title: "Score", sorter: "number", hozAlign: "right", width: 90,
-      formatter: (cell) => {
-        const v = cell.getValue();
-        return v == null ? "" : String(v);
-      },
-    }],
-  };
+  // A factory, not a shared object — Tabulator attaches internal state to
+  // column def objects, so the same literal can't safely be reused across
+  // two separate table instances (same reasoning as buildGroupedSuburbColumns
+  // building fresh defs per call).
+  function buildScoreColumn() {
+    return {
+      title: "Investment Score",
+      columns: [{
+        field: "investmentScore", title: "Score", sorter: "number", hozAlign: "right", width: 90,
+        formatter: (cell) => {
+          const v = cell.getValue();
+          return v == null ? "" : String(v);
+        },
+      }],
+    };
+  }
 
-  const table = new Tabulator("#suburb-table", {
+  wireCompareModalClose();
+  const activeShortlist = loadActiveShortlist();
+
+  // ── Explore suburbs ─────────────────────────────────────────────────────
+  const exploreTable = new Tabulator("#suburb-table", {
     data: suburbs.rows,
-    columns: [scoreColumn, ...buildGroupedSuburbColumns(suburbs.columns)],
+    columns: [buildSelectionColumn(), buildScoreColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
     layout: "fitDataFill",
-    height: "calc(100vh - 360px)",
+    height: "calc(100vh - 400px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
@@ -1795,47 +1986,113 @@ function buildSuburbFinderTab(payload) {
     selectableRows: MAX_COMPARE_SUBURBS,
   });
 
-  createScoreSettingsPanel(
-    document.getElementById("suburbfinder-score-toggle"),
-    document.getElementById("suburbfinder-score-panel"),
-    scoreWeights,
-    () => {
-      // Mutates the same row objects Tabulator already holds as `data`, so a
-      // forced redraw (not setData/updateData, which need an id-keyed match)
-      // is enough to re-render the new Investment Score values.
-      computeInvestmentScores(suburbs.rows, scoreRanks, scoreWeights);
-      table.redraw(true);
-    }
-  );
-
   const fieldCatalog = buildSuburbFieldCatalog(suburbs.columns, suburbs.rows);
   const qb = createQueryBuilder(document.getElementById("suburbfinder-querybuilder"), fieldCatalog, {
     persistKey: "suburbfinder",
-    onFilterChange: () => table.setFilter((row) => qb.matches(row)),
+    onFilterChange: () => exploreTable.setFilter((row) => qb.matches(row)),
   });
   // Apply whatever was restored from localStorage (or the still-empty
   // default) once up front — createQueryBuilder can't safely call
   // onFilterChange during its own construction (this closure captures `qb`,
   // which isn't assigned yet while `createQueryBuilder(...)` is still running).
-  table.setFilter((row) => qb.matches(row));
+  exploreTable.setFilter((row) => qb.matches(row));
 
   createStrategiesPanel(document.getElementById("suburbfinder-strategies"), qb);
   wireSaveStrategyButton(document.getElementById("suburbfinder-save-strategy"), qb);
   document.getElementById("suburbfinder-clear-filters").addEventListener("click", () => qb.clear());
-  wireCompareFeature(table, suburbs.columns);
+  wireCompareFeature(exploreTable, suburbs.columns, "suburbfinder-compare-toggle");
 
-  table.on("tableBuilt", () => {
-    createColumnPanel(table, suburbs.columns, {
+  exploreTable.on("tableBuilt", () => {
+    createColumnPanel(exploreTable, suburbs.columns, {
       panel: "suburbfinder-column-panel", groups: "suburbfinder-column-panel-groups",
       toggle: "suburbfinder-column-panel-toggle", close: "suburbfinder-column-panel-close",
       selectAll: "suburbfinder-column-panel-all", selectNone: "suburbfinder-column-panel-none",
       storageKey: "suburbfinder-hidden-columns",
     });
   });
-  table.on("dataFiltered", () => updateRowCount(table, "suburbfinder-row-count", "suburbs"));
-  table.on("renderComplete", () => updateRowCount(table, "suburbfinder-row-count", "suburbs"));
+  exploreTable.on("dataFiltered", () => updateRowCount(exploreTable, "suburbfinder-row-count", "suburbs"));
+  exploreTable.on("renderComplete", () => updateRowCount(exploreTable, "suburbfinder-row-count", "suburbs"));
 
-  return table;
+  // ── Shortlist ────────────────────────────────────────────────────────────
+  function shortlistRows() {
+    return suburbs.rows.filter((row) => activeShortlist.has(suburbKey(row)));
+  }
+
+  const shortlistTable = new Tabulator("#shortlist-table", {
+    data: shortlistRows(),
+    columns: [buildSelectionColumn(), buildScoreColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
+    layout: "fitDataFill",
+    height: "calc(100vh - 400px)",
+    pagination: true,
+    paginationMode: "local",
+    paginationSize: 50,
+    paginationSizeSelector: [25, 50, 100, 250, 500],
+    placeholder: "Nothing in this shortlist yet — tick suburbs in Explore suburbs and click \"Add to Shortlist\".",
+    selectableRows: MAX_COMPARE_SUBURBS,
+  });
+
+  function refreshShortlistTable() {
+    saveActiveShortlist(activeShortlist);
+    shortlistTable.setData(shortlistRows());
+  }
+
+  const addToShortlistBtn = document.getElementById("suburbfinder-add-to-shortlist");
+  exploreTable.on("rowSelectionChanged", (data) => {
+    addToShortlistBtn.disabled = data.length === 0;
+  });
+  addToShortlistBtn.addEventListener("click", () => {
+    exploreTable.getSelectedData().forEach((row) => activeShortlist.add(suburbKey(row)));
+    exploreTable.deselectRow();
+    refreshShortlistTable();
+  });
+
+  const removeFromShortlistBtn = document.getElementById("shortlist-remove");
+  shortlistTable.on("rowSelectionChanged", (data) => {
+    removeFromShortlistBtn.disabled = data.length === 0;
+  });
+  removeFromShortlistBtn.addEventListener("click", () => {
+    shortlistTable.getSelectedData().forEach((row) => activeShortlist.delete(suburbKey(row)));
+    refreshShortlistTable();
+  });
+
+  createShortlistsPanel(document.getElementById("shortlist-saved"), (keys) => {
+    activeShortlist.clear();
+    keys.forEach((k) => activeShortlist.add(k));
+    refreshShortlistTable();
+  });
+  wireSaveShortlistButton(document.getElementById("shortlist-save"), () => activeShortlist);
+  wireCompareFeature(shortlistTable, suburbs.columns, "shortlist-compare-toggle");
+
+  shortlistTable.on("tableBuilt", () => {
+    createColumnPanel(shortlistTable, suburbs.columns, {
+      panel: "shortlist-column-panel", groups: "shortlist-column-panel-groups",
+      toggle: "shortlist-column-panel-toggle", close: "shortlist-column-panel-close",
+      selectAll: "shortlist-column-panel-all", selectNone: "shortlist-column-panel-none",
+      storageKey: "shortlist-hidden-columns",
+    });
+  });
+  shortlistTable.on("dataFiltered", () => updateRowCount(shortlistTable, "shortlist-row-count", "suburbs"));
+  shortlistTable.on("renderComplete", () => updateRowCount(shortlistTable, "shortlist-row-count", "suburbs"));
+
+  // ── Shared: Investment Score weights redraw both tables; sub-tab switch ──
+  createScoreSettingsPanel(
+    document.getElementById("suburbfinder-score-toggle"),
+    document.getElementById("suburbfinder-score-panel"),
+    scoreWeights,
+    () => {
+      // Mutates the same row objects both tables hold as `data` (Explore
+      // holds the full array, Shortlist a filtered subset of the same
+      // objects), so a forced redraw on each — not setData/updateData,
+      // which need an id-keyed match — is enough to re-render.
+      computeInvestmentScores(suburbs.rows, scoreRanks, scoreWeights);
+      exploreTable.redraw(true);
+      shortlistTable.redraw(true);
+    }
+  );
+
+  setupSubTabs(document.getElementById("tab-suburbfinder"), { explore: exploreTable, shortlist: shortlistTable });
+
+  return exploreTable;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

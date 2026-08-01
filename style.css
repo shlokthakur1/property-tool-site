@@ -322,6 +322,50 @@ a:hover {
   align-items: center;
 }
 
+/* Secondary sub-tabs nested inside a .pt-shell (e.g. Suburb Finder's
+   Explore suburbs / Shortlist) — a lighter, smaller strip than the
+   top-level .tabs bar, since it lives inside the card rather than spanning
+   the page. */
+.subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.subtabs__btn {
+  border: none;
+  background: none;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: var(--font-family);
+  cursor: pointer;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.subtabs__btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.subtabs__btn.is-active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+.subtab-panel {
+  display: none;
+}
+
+.subtab-panel.is-active {
+  display: block;
+}
+
 .toolbar__params {
   display: flex;
   gap: 8px;
@@ -1308,6 +1352,24 @@ a:hover {
 
 .tabulator .tabulator-row:hover {
   background-color: var(--surface-hover);
+}
+
+/* Must come after the zebra/hover rules above to win the same-specificity
+   cascade tie — otherwise a selected even-numbered row silently keeps its
+   zebra tint instead of showing as selected. */
+.tabulator .tabulator-row.tabulator-selected {
+  background-color: var(--primary-bg);
+}
+
+.tabulator .tabulator-row.tabulator-selected:hover {
+  background-color: var(--primary-bg-hover);
+}
+
+.tabulator input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
 }
 
 .tabulator .tabulator-cell {

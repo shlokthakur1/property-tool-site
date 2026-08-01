@@ -33,34 +33,64 @@
 
   <section id="tab-suburbfinder" class="tab-panel is-active">
     <div class="pt-shell">
-      <section class="toolbar toolbar--wrap">
-        <div class="strategies-bar">
-          <div id="suburbfinder-strategies" class="strategies"></div>
-          <button id="suburbfinder-save-strategy" class="btn btn--secondary">Save as Strategy</button>
-        </div>
-        <button id="suburbfinder-clear-filters" class="btn btn--ghost">Clear filters</button>
-        <button id="suburbfinder-column-panel-toggle" class="btn btn--secondary">Columns</button>
-        <button id="suburbfinder-compare-toggle" class="btn btn--secondary" disabled>Compare (0)</button>
-        <div class="score-settings">
-          <button id="suburbfinder-score-toggle" class="btn btn--secondary">Score weights</button>
-          <div id="suburbfinder-score-panel" class="score-settings__panel"></div>
-        </div>
-        <span id="suburbfinder-row-count" class="toolbar__count"></span>
-      </section>
-      <div id="suburbfinder-querybuilder" class="querybuilder"></div>
-      <p class="subdivision-note">
-        One row per suburb, computed from the full listing history (including the 2-year sold sweep) —
-        not just what's browsable in Data Table. Build a filter below (field / condition / value per row,
-        the left-hand toggle sets AND/OR for that group, "&gt;" nests a condition into a sub-group with the
-        row above it) and save it as a named Strategy to reuse later. Price growth (1mo/6mo/1yr/2yr) compares
-        median sold price across two equal-width windows ending today, e.g. 1yr growth is the last ~6 months
-        vs the ~6 months before that — 1mo especially will be blank for lower-volume suburbs, since it needs
-        3+ dated sales on each side of a ~2-week split. See <code>suburb_columns</code> in
-        <code>config.yaml</code> for the full methodology, and the Data Definitions tab for what every column
-        here means.
-      </p>
+      <nav class="subtabs">
+        <button class="subtabs__btn is-active" data-subtab="explore">Explore suburbs</button>
+        <button class="subtabs__btn" data-subtab="shortlist">Shortlist</button>
+      </nav>
 
-      <div id="suburb-table"></div>
+      <div id="subtab-explore" class="subtab-panel is-active">
+        <section class="toolbar toolbar--wrap">
+          <div class="strategies-bar">
+            <div id="suburbfinder-strategies" class="strategies"></div>
+            <button id="suburbfinder-save-strategy" class="btn btn--secondary">Save as Strategy</button>
+          </div>
+          <button id="suburbfinder-clear-filters" class="btn btn--ghost">Clear filters</button>
+          <button id="suburbfinder-column-panel-toggle" class="btn btn--secondary">Columns</button>
+          <button id="suburbfinder-compare-toggle" class="btn btn--secondary" disabled>Compare (0)</button>
+          <button id="suburbfinder-add-to-shortlist" class="btn btn--secondary" disabled>Add to Shortlist</button>
+          <div class="score-settings">
+            <button id="suburbfinder-score-toggle" class="btn btn--secondary">Score weights</button>
+            <div id="suburbfinder-score-panel" class="score-settings__panel"></div>
+          </div>
+          <span id="suburbfinder-row-count" class="toolbar__count"></span>
+        </section>
+        <div id="suburbfinder-querybuilder" class="querybuilder"></div>
+        <p class="subdivision-note">
+          One row per suburb, computed from the full listing history (including the 2-year sold sweep) —
+          not just what's browsable in Data Table. Build a filter below (field / condition / value per row,
+          the left-hand toggle sets AND/OR for that group, "&gt;" nests a condition into a sub-group with the
+          row above it) and save it as a named Strategy to reuse later. Tick rows (checkbox column) to
+          Compare or Add to Shortlist. Price growth (1mo/6mo/1yr/2yr) compares
+          median sold price across two equal-width windows ending today, e.g. 1yr growth is the last ~6 months
+          vs the ~6 months before that — 1mo especially will be blank for lower-volume suburbs, since it needs
+          3+ dated sales on each side of a ~2-week split. See <code>suburb_columns</code> in
+          <code>config.yaml</code> for the full methodology, and the Data Definitions tab for what every column
+          here means.
+        </p>
+
+        <div id="suburb-table"></div>
+      </div>
+
+      <div id="subtab-shortlist" class="subtab-panel">
+        <section class="toolbar toolbar--wrap">
+          <div class="strategies-bar">
+            <div id="shortlist-saved" class="strategies"></div>
+            <button id="shortlist-save" class="btn btn--secondary">Save as Shortlist</button>
+          </div>
+          <button id="shortlist-remove" class="btn btn--ghost" disabled>Remove from Shortlist</button>
+          <button id="shortlist-column-panel-toggle" class="btn btn--secondary">Columns</button>
+          <button id="shortlist-compare-toggle" class="btn btn--secondary" disabled>Compare (0)</button>
+          <span id="shortlist-row-count" class="toolbar__count"></span>
+        </section>
+        <p class="subdivision-note">
+          Suburbs you've explicitly added via "Add to Shortlist" in Explore suburbs — <strong>not</strong>
+          affected by any filters there. Tick rows to Compare or Remove. "Load Shortlist" swaps in a
+          previously saved named list; "Save as Shortlist" snapshots the current one under a name so you
+          can build up more than one (e.g. per strategy or state) and switch between them.
+        </p>
+
+        <div id="shortlist-table"></div>
+      </div>
     </div>
   </section>
 
@@ -217,6 +247,18 @@
       <button id="suburbfinder-column-panel-none" class="btn btn--ghost">Select none</button>
     </div>
     <div id="suburbfinder-column-panel-groups" class="column-panel__groups"></div>
+  </aside>
+
+  <aside id="shortlist-column-panel" class="column-panel" hidden>
+    <div class="column-panel__header">
+      <h3>Columns</h3>
+      <button id="shortlist-column-panel-close" class="btn btn--ghost" aria-label="Close">✕</button>
+    </div>
+    <div class="column-panel__actions">
+      <button id="shortlist-column-panel-all" class="btn btn--ghost">Select all</button>
+      <button id="shortlist-column-panel-none" class="btn btn--ghost">Select none</button>
+    </div>
+    <div id="shortlist-column-panel-groups" class="column-panel__groups"></div>
   </aside>
 
   <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
