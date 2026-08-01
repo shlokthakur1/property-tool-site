@@ -47,6 +47,14 @@ function buildColumnDef(col) {
         },
       };
     }
+    if (col.field === "address") {
+      // Tabulator refuses `frozen` on a column nested in a column group
+      // ("Parent column group must be frozen, not individual columns") — this
+      // table's columns are grouped (buildGroupedColumns), so true pinning
+      // isn't available here; cssClass alone gives it the identity-column
+      // emphasis (bold, no-wrap) without pinning.
+      return { ...base, cssClass: "pt-identity" };
+    }
     if (
       col.field === "land_size_m2" ||
       col.field === "suburb_comparable_count" ||
@@ -59,12 +67,13 @@ function buildColumnDef(col) {
       col.field === "months_of_supply" ||
       col.field === "distance_to_gpo_km"
     ) {
-      return { ...base, sorter: "number" };
+      return { ...base, sorter: "number", hozAlign: "right" };
     }
     if (col.field === "non_res_building_approvals_value_fy" || col.field === "infrastructure_spend_per_capita") {
       return {
         ...base,
         sorter: "number",
+        hozAlign: "right",
         formatter: (cell) => {
           const value = cell.getValue();
           return value == null ? "" : `$${Math.round(value).toLocaleString()}`;
@@ -75,6 +84,7 @@ function buildColumnDef(col) {
       return {
         ...base,
         sorter: "number",
+        hozAlign: "right",
         formatter: (cell) => {
           const value = cell.getValue();
           return value == null ? "" : Math.round(value).toLocaleString();
@@ -85,6 +95,7 @@ function buildColumnDef(col) {
       return {
         ...base,
         sorter: "number",
+        hozAlign: "right",
         formatter: (cell) => {
           const value = cell.getValue();
           if (value == null) return "";
@@ -97,6 +108,7 @@ function buildColumnDef(col) {
       return {
         ...base,
         sorter: "number",
+        hozAlign: "right",
         formatter: (cell) => {
           const value = cell.getValue();
           return value == null ? "" : Math.round(value).toString();
@@ -107,6 +119,7 @@ function buildColumnDef(col) {
       return {
         ...base,
         sorter: "number",
+        hozAlign: "right",
         formatter: (cell) => {
           const value = cell.getValue();
           return value == null ? "" : `$${Math.round(value).toLocaleString()}`;
@@ -117,6 +130,7 @@ function buildColumnDef(col) {
       return {
         ...base,
         sorter: "number",
+        hozAlign: "right",
         formatter: (cell) => {
           const value = cell.getValue();
           return value == null ? "" : `$${Math.round(value).toLocaleString()}/m²`;
@@ -127,6 +141,7 @@ function buildColumnDef(col) {
       return {
         ...base,
         sorter: "number",
+        hozAlign: "right",
         formatter: (cell) => {
           const value = cell.getValue();
           if (value == null) return "";
@@ -151,12 +166,20 @@ function buildGroupedColumns(columnsCfg) {
   const byName = new Map();
   columnsCfg.forEach((col) => {
     const groupName = col.group || "Other";
-    if (!byName.has(groupName)) {
+    const isFirstInNewGroup = !byName.has(groupName);
+    if (isFirstInNewGroup) {
       const groupDef = { title: groupName, columns: [] };
       byName.set(groupName, groupDef);
       groups.push(groupDef);
     }
-    byName.get(groupName).columns.push(buildColumnDef(col));
+    const colDef = buildColumnDef(col);
+    // Mark the first column of every group after the first with a hairline
+    // divider (see .pt-group-start in style.css) — the "quiet zebra" table
+    // treatment uses these instead of a full vertical grid.
+    if (isFirstInNewGroup && groups.length > 1) {
+      colDef.cssClass = [colDef.cssClass, "pt-group-start"].filter(Boolean).join(" ");
+    }
+    byName.get(groupName).columns.push(colDef);
   });
   return groups;
 }
@@ -463,14 +486,14 @@ function formatMoney(value) {
 
 function buildSuburbColumns() {
   return [
-    { field: "suburb", title: "Suburb", headerFilter: false },
+    { field: "suburb", title: "Suburb", headerFilter: false, frozen: true },
     { field: "state", title: "State", headerFilter: false, width: 80 },
     {
-      field: "opportunityCount", title: "Opportunities", sorter: "number", width: 130,
+      field: "opportunityCount", title: "Opportunities", sorter: "number", width: 130, hozAlign: "right",
       formatter: (cell) => cell.getValue().toLocaleString(),
     },
     {
-      field: "bestProfit", title: "Best Est. Profit", sorter: "number",
+      field: "bestProfit", title: "Best Est. Profit", sorter: "number", hozAlign: "right",
       formatter: (cell) => {
         const value = cell.getValue();
         return `<span class="profit-positive">+${formatMoney(value)}</span>`;
@@ -661,7 +684,7 @@ function buildSubdivisionTab(payload) {
     data: buildSuburbGroups(listings, subdivisionParams),
     columns: buildSuburbColumns(),
     layout: "fitDataFill",
-    height: "calc(100vh - 280px)",
+    height: "calc(100vh - 320px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
@@ -1301,35 +1324,41 @@ function formatPercentSigned(value) {
 
 function buildSuburbColumnDef(col) {
     const base = { field: col.field, title: col.title, headerFilter: false };
+    // Tabulator refuses `frozen` on a column nested in a column group
+    // ("Parent column group must be frozen, not individual columns") — this
+    // table's columns are grouped (buildGroupedSuburbColumns), so true pinning
+    // isn't available here; cssClass alone gives it the identity-column
+    // emphasis (bold, no-wrap) without pinning.
+    if (col.field === "suburb") return { ...base, cssClass: "pt-identity" };
     if (SUBURB_MONEY_FIELDS.has(col.field)) {
-      return { ...base, sorter: "number", formatter: (cell) => {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : `$${Math.round(v).toLocaleString()}`;
       } };
     }
     if (SUBURB_MONEY_PER_M2_FIELDS.has(col.field)) {
-      return { ...base, sorter: "number", formatter: (cell) => {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : `$${Math.round(v).toLocaleString()}/m²`;
       } };
     }
     if (SUBURB_MONEY_PER_WEEK_FIELDS.has(col.field)) {
-      return { ...base, sorter: "number", formatter: (cell) => {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : `$${Math.round(v).toLocaleString()}/wk`;
       } };
     }
     if (SUBURB_KM_FIELDS.has(col.field)) {
-      return { ...base, sorter: "number", formatter: (cell) => {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : `${v.toFixed(1)} km`;
       } };
     }
     if (SUBURB_PERCENT_SIGNED_FIELDS.has(col.field)) {
-      return { ...base, sorter: "number", formatter: (cell) => formatPercentSigned(cell.getValue()) };
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => formatPercentSigned(cell.getValue()) };
     }
     if (SUBURB_INT_FIELDS.has(col.field)) {
-      return { ...base, sorter: "number", formatter: (cell) => {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : Math.round(v).toLocaleString();
       } };
@@ -1345,12 +1374,17 @@ function buildGroupedSuburbColumns(columnsCfg) {
   const byName = new Map();
   columnsCfg.forEach((col) => {
     const groupName = col.group || "Other";
-    if (!byName.has(groupName)) {
+    const isFirstInNewGroup = !byName.has(groupName);
+    if (isFirstInNewGroup) {
       const groupDef = { title: groupName, columns: [] };
       byName.set(groupName, groupDef);
       groups.push(groupDef);
     }
-    byName.get(groupName).columns.push(buildSuburbColumnDef(col));
+    const colDef = buildSuburbColumnDef(col);
+    if (isFirstInNewGroup && groups.length > 1) {
+      colDef.cssClass = [colDef.cssClass, "pt-group-start"].filter(Boolean).join(" ");
+    }
+    byName.get(groupName).columns.push(colDef);
   });
   return groups;
 }
@@ -1363,7 +1397,7 @@ function buildSuburbFinderTab(payload) {
     data: suburbs.rows,
     columns: buildGroupedSuburbColumns(suburbs.columns),
     layout: "fitDataFill",
-    height: "calc(100vh - 320px)",
+    height: "calc(100vh - 360px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
@@ -1592,7 +1626,7 @@ async function main() {
     data: payload.rows,
     columns: buildGroupedColumns(payload.columns),
     layout: "fitDataFill",
-    height: "calc(100vh - 220px)",
+    height: "calc(100vh - 260px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,

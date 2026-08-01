@@ -1,9 +1,52 @@
 :root {
-  --border: #d9dde3;
-  --text-muted: #5a6472;
-  --primary: #1f6feb;
-  --primary-hover: #185ac2;
-  font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  /* Type */
+  --font-family: "Instrument Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+
+  /* Accent */
+  --primary: #6c5ce0;
+  --primary-hover: #5a49c9;
+  --primary-bg: #f1eefc;
+  --primary-bg-hover: #e7e2f9;
+
+  /* Neutrals */
+  --text: #251f36;
+  --text-muted: #6d6683;
+  --text-faint: #8b84a3;
+  --border: #e7e4f1;
+  --surface: #ffffff;
+  --surface-sunken: #f8f7fc;
+  --surface-hover: #f3f1fb;
+  --canvas: #f2f0f8;
+
+  /* Status */
+  --success: #2f7d5d;
+  --success-bg: #e6f3ec;
+  --warning: #8a6417;
+  --warning-bg: #f8f0dd;
+  --danger: #a03a44;
+  --danger-bg: #f9e9ea;
+
+  /* Shape */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --space-4: 9px;
+  --space-7: 16px;
+
+  /* Elevation */
+  --shadow-dropdown: 0 10px 30px rgba(52, 38, 110, .13);
+  --shadow-modal: 0 24px 60px rgba(38, 28, 80, .28);
+  --shadow-panel: -10px 0 34px rgba(52, 38, 110, .14);
+  --shadow-shell: 0 1px 2px rgba(52, 38, 110, .05), 0 12px 32px rgba(52, 38, 110, .06);
+
+  /* Quiet-zebra table */
+  --zebra: #faf9fd;
+  --group-band: #f6f4fc;
+  --group-band-text: #7d7695;
+  --col-header-text: #4b4460;
+  --hairline-body: #f0edf7;
+  --hairline-header: #e2ddf0;
 }
 
 * {
@@ -12,8 +55,20 @@
 
 body {
   margin: 0;
-  background: #f5f6f8;
-  color: #1a1f27;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
 }
 
 .app-header {
@@ -21,13 +76,14 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   padding: 16px 24px;
-  background: #ffffff;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
 .app-header__title h1 {
   margin: 0;
   font-size: 20px;
+  color: var(--text);
 }
 
 .app-header__meta {
@@ -43,11 +99,14 @@ body {
 
 .btn {
   border: 1px solid var(--border);
-  background: #fff;
-  border-radius: 6px;
-  padding: 8px 14px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-7);
   font-size: 13px;
+  font-family: var(--font-family);
+  color: var(--text);
   cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .btn--primary {
@@ -58,29 +117,31 @@ body {
 
 .btn--primary:hover {
   background: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
 
 .btn--secondary:hover,
 .btn--ghost:hover {
-  background: #f0f1f3;
+  background: var(--surface-hover);
 }
 
 .toolbar {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 12px 24px;
-  background: #fff;
+  padding: 16px 24px;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
 .toolbar__search {
   flex: 1 1 220px;
-  padding: 8px 10px;
+  padding: var(--space-4) 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 13px;
+  font-family: var(--font-family);
 }
 
 .toolbar__filters {
@@ -103,11 +164,13 @@ body {
 }
 
 .multiselect__toggle {
-  padding: 7px 10px;
+  padding: 7px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 13px;
-  background: #fff;
+  font-family: var(--font-family);
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
 }
 
@@ -124,11 +187,11 @@ body {
   left: 0;
   z-index: 20;
   width: 220px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-  padding: 8px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-dropdown);
+  padding: 10px;
 }
 
 .multiselect__panel.is-open {
@@ -137,17 +200,18 @@ body {
 
 .multiselect__search {
   width: 100%;
-  padding: 6px 8px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 13px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  box-sizing: border-box;
 }
 
 .multiselect__actions {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .multiselect__actions button {
@@ -167,31 +231,51 @@ body {
 .multiselect__item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 2px;
+  gap: 8px;
+  padding: 5px 4px;
   font-size: 13px;
   cursor: pointer;
+  border-radius: var(--radius-sm);
 }
 
 .multiselect__item:hover {
-  background: #f5f6f8;
+  background: var(--surface-sunken);
 }
 
 .multiselect__item input {
   margin: 0;
 }
 
-#property-table {
-  margin: 16px 24px;
+/* Card shell — each tab's toolbar/content/table sits on one rounded,
+   softly-shadowed surface floating on the lavender page canvas. */
+.pt-shell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-shell);
+  margin: 20px 24px 24px;
+}
+
+#property-table,
+#subdivision-table,
+#suburb-table {
+  margin: 8px 0 0;
+}
+
+#definitions-list {
+  margin: 8px 0 0;
+  background: var(--surface);
+  overflow: hidden;
 }
 
 /* vs suburb median: above median (pricier) vs below median (cheaper) */
 .pct-above {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 .pct-below {
-  color: #1e8e3e;
+  color: var(--success);
 }
 
 /* Tabs */
@@ -199,7 +283,7 @@ body {
   display: flex;
   gap: 4px;
   padding: 0 24px;
-  background: #fff;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
@@ -208,14 +292,16 @@ body {
   background: none;
   padding: 12px 16px;
   font-size: 14px;
+  font-family: var(--font-family);
   cursor: pointer;
   color: var(--text-muted);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
 .tabs__btn:hover {
-  color: #1a1f27;
+  color: var(--text);
 }
 
 .tabs__btn.is-active {
@@ -242,43 +328,35 @@ body {
 }
 
 .subdivision-note {
-  margin: 12px 24px;
-  padding: 10px 14px;
-  background: #eef4ff;
-  border: 1px solid #cfe0fb;
-  border-radius: 8px;
+  margin: 14px 24px;
+  padding: 14px 16px;
+  background: #f8f6fe;
+  border: 1px solid #e4dff4;
+  border-radius: var(--radius-lg);
   font-size: 13px;
-  color: #1a1f27;
+  line-height: 1.65;
+  color: #5f5878;
 }
 
 .subdivision-note code {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(108, 92, 224, 0.08);
+  color: var(--text);
   padding: 1px 5px;
   border-radius: 4px;
 }
 
-#subdivision-table {
-  margin: 16px 24px;
-}
-
-#definitions-list {
-  margin: 16px 24px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
+/* Data Definitions — one table per tab documented */
 #definitions-list .comps-table {
   font-size: 13px;
 }
 
 #definitions-list .comps-table th {
-  background: #f5f6f8;
+  background: var(--group-band);
+  color: var(--group-band-text);
 }
 
 #definitions-list .comps-table code {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(108, 92, 224, 0.08);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 12px;
@@ -288,7 +366,7 @@ body {
 .rangefilter {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .rangefilter__label {
@@ -301,8 +379,9 @@ body {
   width: 90px;
   padding: 7px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 13px;
+  font-family: var(--font-family);
 }
 
 /* Live subdivision economics inputs */
@@ -312,9 +391,9 @@ body {
   gap: 6px;
   font-size: 13px;
   color: var(--text-muted);
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 6px 10px;
 }
 
@@ -322,49 +401,50 @@ body {
   width: 90px;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
+  font-family: var(--font-family);
 }
 
 /* Estimated subdivision profit */
 .profit-positive {
-  color: #1e8e3e;
+  color: var(--success);
   font-weight: 600;
 }
 
 .profit-negative {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 /* Confidence badge (comp-count-backed) */
 .confidence-badge {
   display: inline-block;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
 }
 
 .confidence-high {
-  background: #e3f5e9;
-  color: #1e8e3e;
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .confidence-medium {
-  background: #fdf1da;
-  color: #a15c00;
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 
 .confidence-low {
-  background: #fbe6e5;
-  color: #b3261e;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 /* Subdivision drill-down modal */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(37, 31, 54, 0.42);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -377,30 +457,31 @@ body {
 }
 
 .modal-dialog {
-  background: #fff;
-  border-radius: 10px;
+  background: var(--surface);
+  border-radius: var(--radius-xl);
   width: min(720px, 100%);
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-modal);
 }
 
 .modal-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 20px 24px;
   border-bottom: 1px solid var(--border);
 }
 
 .modal-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
+  color: var(--text);
 }
 
 .modal-body {
-  padding: 12px 20px 20px;
+  padding: 16px 24px 24px;
   overflow-y: auto;
 }
 
@@ -410,17 +491,18 @@ body {
 }
 
 .modal-note {
-  color: var(--text-muted);
-  font-size: 12px;
+  color: var(--text-faint);
+  font-size: 12.5px;
   margin: 4px 0 10px;
 }
 
 /* One for-sale listing within a suburb's drill-down */
 .listing-card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid #ece9f5;
+  border-radius: var(--radius-lg);
   margin: 10px 0;
   overflow: hidden;
+  background: #fdfcff;
 }
 
 .listing-card__summary {
@@ -428,12 +510,12 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 14px 16px;
   cursor: pointer;
 }
 
 .listing-card__summary:hover {
-  background: #f5f6f8;
+  background: var(--surface-hover);
 }
 
 .listing-card__main {
@@ -445,7 +527,7 @@ body {
 
 .listing-card__main a {
   font-weight: 600;
-  color: #1a1f27;
+  color: var(--text);
   text-decoration: none;
 }
 
@@ -454,8 +536,8 @@ body {
 }
 
 .listing-card__meta {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: 12.5px;
+  color: var(--text-faint);
 }
 
 .listing-card__profit {
@@ -466,7 +548,7 @@ body {
 }
 
 .listing-card__detail {
-  padding: 0 14px 14px;
+  padding: 0 16px 16px;
   border-top: 1px solid var(--border);
 }
 
@@ -495,6 +577,7 @@ body {
 .listing-detail h4 {
   margin: 14px 0 2px;
   font-size: 13px;
+  color: var(--text);
 }
 
 .comps-table {
@@ -506,7 +589,7 @@ body {
 .comps-table th,
 .comps-table td {
   text-align: left;
-  padding: 5px 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -526,9 +609,9 @@ body {
   right: 0;
   bottom: 0;
   width: min(320px, 90vw);
-  background: #fff;
+  background: var(--surface);
   border-left: 1px solid var(--border);
-  box-shadow: -6px 0 20px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-panel);
   z-index: 90;
   display: flex;
   flex-direction: column;
@@ -542,19 +625,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
 }
 
 .column-panel__header h3 {
   margin: 0;
   font-size: 15px;
+  color: var(--text);
 }
 
 .column-panel__actions {
   display: flex;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -565,7 +649,7 @@ body {
 
 .column-panel__group {
   border-bottom: 1px solid var(--border);
-  padding: 8px 16px;
+  padding: 10px 20px;
 }
 
 .column-panel__group summary {
@@ -573,26 +657,28 @@ body {
   font-weight: 600;
   cursor: pointer;
   padding: 4px 0;
+  color: var(--text);
 }
 
 .column-panel__list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .column-panel__item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 2px;
+  padding: 5px 4px;
   font-size: 13px;
   cursor: pointer;
+  border-radius: var(--radius-sm);
 }
 
 .column-panel__item:hover {
-  background: #f5f6f8;
+  background: var(--surface-sunken);
 }
 
 .column-panel__item input {
@@ -603,6 +689,7 @@ body {
 .definitions-heading {
   margin: 20px 24px 4px;
   font-size: 15px;
+  color: var(--text);
 }
 
 .definitions-heading:first-child {
@@ -628,10 +715,10 @@ body {
   width: 300px;
   max-height: 320px;
   overflow-y: auto;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-dropdown);
   padding: 6px;
 }
 
@@ -650,12 +737,12 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px;
 }
 
 .strategy-item:hover {
-  background: #f5f6f8;
+  background: var(--surface-sunken);
 }
 
 .strategy-item__name {
@@ -665,15 +752,17 @@ body {
   background: none;
   padding: 6px 8px;
   font-size: 13px;
+  font-family: var(--font-family);
   cursor: pointer;
   white-space: normal;
   word-break: break-word;
+  color: var(--text);
 }
 
 .strategy-item__delete {
   border: none;
   background: none;
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -682,7 +771,7 @@ body {
 }
 
 .strategy-item__delete:hover {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 /* hTag-style nested filter builder (Suburb Finder tab) */
@@ -694,14 +783,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: var(--radius-lg);
+  padding: 12px;
 }
 
 .qb-group--nested {
-  background: #f7f9fc;
+  background: var(--surface-sunken);
   margin: 4px 0;
 }
 
@@ -716,9 +805,9 @@ body {
   flex: 0 0 auto;
   width: 40px;
   border: 1px solid var(--primary);
-  color: var(--primary);
-  background: #eef4ff;
-  border-radius: 6px;
+  color: var(--primary-hover);
+  background: var(--primary-bg);
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -730,7 +819,7 @@ body {
 }
 
 .qb-combinator:hover {
-  background: #e0ebff;
+  background: var(--primary-bg-hover);
 }
 
 .qb-rows {
@@ -764,9 +853,11 @@ body {
 .qb-select {
   padding: 7px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 13px;
-  background: #fff;
+  font-family: var(--font-family);
+  background: var(--surface);
+  color: var(--text);
 }
 
 .qb-value {
@@ -778,8 +869,9 @@ body {
   width: 140px;
   padding: 7px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 13px;
+  font-family: var(--font-family);
 }
 
 .qb-value-input--text {
@@ -807,4 +899,143 @@ body {
 .qb-add {
   flex: 0 0 auto;
   align-self: flex-start;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Tabulator — "Quiet zebra": hairline structure only (no full grid), zebra
+   stripe carries row separation, comfortable density, tabular numerals, and
+   a pinned identity column (Suburb / Address — see the `frozen: true` column
+   defs in app.js). Group-boundary hairlines come from the `pt-group-start`
+   cssClass Tabulator applies to both the header cell and every body cell of
+   the first column in each group (buildGroupedColumns / buildGroupedSuburbColumns
+   in app.js) — never a full vertical grid.
+   ───────────────────────────────────────────────────────────────────────── */
+.tabulator {
+  border: none;
+  background: transparent;
+  font-family: var(--font-family);
+  font-size: 13.5px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabulator .tabulator-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline-header);
+}
+
+.tabulator .tabulator-col,
+.tabulator .tabulator-cell {
+  border-right: none;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+  padding: 12px 18px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--col-header-text);
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover {
+  background: var(--surface-hover);
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-col-group {
+  background: var(--group-band);
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-col-group > .tabulator-col-content {
+  padding: 9px 18px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--group-band-text);
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-col-group + .tabulator-col.tabulator-col-group {
+  box-shadow: inset 1px 0 0 var(--border);
+}
+
+/* Hairline dividers at group boundaries only — the "no full grid" rule */
+.tabulator .tabulator-col.pt-group-start .tabulator-col-content {
+  box-shadow: inset 1px 0 0 var(--hairline-header);
+}
+
+.tabulator-cell.pt-group-start {
+  box-shadow: inset 1px 0 0 var(--hairline-body);
+}
+
+.tabulator .tabulator-row {
+  background-color: var(--surface);
+  min-height: 46px;
+}
+
+.tabulator .tabulator-row.tabulator-row-even {
+  background-color: var(--zebra);
+}
+
+.tabulator .tabulator-row:hover {
+  background-color: var(--surface-hover);
+}
+
+.tabulator .tabulator-cell {
+  padding: 14px 18px;
+  font-size: 13.5px;
+}
+
+/* Identity column (Suburb / Address) — pinned via `frozen` where the table
+   has no column groups (Subdivision; Tabulator refuses `frozen` on a column
+   nested in a group), styled via `.pt-identity` alone where it's grouped
+   (Data Table, Suburb Finder). Tabulator already makes a frozen cell inherit
+   its row's background-color, so zebra + hover coloring carries through
+   automatically there; only typography and the divider color need overriding. */
+.tabulator .tabulator-cell.tabulator-frozen,
+.tabulator .tabulator-header .tabulator-frozen,
+.tabulator .tabulator-cell.pt-identity,
+.tabulator .tabulator-header .tabulator-col.pt-identity {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tabulator-row .tabulator-cell.tabulator-frozen.tabulator-frozen-left {
+  border-right: 1px solid var(--hairline-body);
+}
+
+.tabulator .tabulator-header .tabulator-frozen.tabulator-frozen-left {
+  border-right: 1px solid var(--hairline-header);
+}
+
+.tabulator .tabulator-placeholder {
+  color: var(--text-faint);
+  font-family: var(--font-family);
+  font-size: 13.5px;
+}
+
+.tabulator .tabulator-footer {
+  background: var(--zebra);
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 12.5px;
+  padding: 8px 16px;
+}
+
+.tabulator .tabulator-footer .tabulator-page,
+.tabulator .tabulator-footer .tabulator-page-size {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-family);
+  font-size: 12.5px;
+}
+
+.tabulator .tabulator-footer .tabulator-page:hover:not(.active):not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.tabulator .tabulator-footer .tabulator-page.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
 }

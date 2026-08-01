@@ -6,6 +6,9 @@
   <title>Australia Property Explorer</title>
 
   <link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -28,69 +31,77 @@
   </nav>
 
   <section id="tab-suburbfinder" class="tab-panel is-active">
-    <section class="toolbar toolbar--wrap">
-      <div class="strategies-bar">
-        <div id="suburbfinder-strategies" class="strategies"></div>
-        <button id="suburbfinder-save-strategy" class="btn btn--secondary">Save as Strategy</button>
-      </div>
-      <button id="suburbfinder-clear-filters" class="btn btn--ghost">Clear filters</button>
-      <button id="suburbfinder-column-panel-toggle" class="btn btn--secondary">Columns</button>
-      <span id="suburbfinder-row-count" class="toolbar__count"></span>
-    </section>
-    <div id="suburbfinder-querybuilder" class="querybuilder"></div>
-    <p class="subdivision-note">
-      One row per suburb, computed from the full listing history (including the 2-year sold sweep) —
-      not just what's browsable in Data Table. Build a filter below (field / condition / value per row,
-      the left-hand toggle sets AND/OR for that group, "&gt;" nests a condition into a sub-group with the
-      row above it) and save it as a named Strategy to reuse later. Price growth (1mo/6mo/1yr/2yr) compares
-      median sold price across two equal-width windows ending today, e.g. 1yr growth is the last ~6 months
-      vs the ~6 months before that — 1mo especially will be blank for lower-volume suburbs, since it needs
-      3+ dated sales on each side of a ~2-week split. See <code>suburb_columns</code> in
-      <code>config.yaml</code> for the full methodology, and the Data Definitions tab for what every column
-      here means.
-    </p>
+    <div class="pt-shell">
+      <section class="toolbar toolbar--wrap">
+        <div class="strategies-bar">
+          <div id="suburbfinder-strategies" class="strategies"></div>
+          <button id="suburbfinder-save-strategy" class="btn btn--secondary">Save as Strategy</button>
+        </div>
+        <button id="suburbfinder-clear-filters" class="btn btn--ghost">Clear filters</button>
+        <button id="suburbfinder-column-panel-toggle" class="btn btn--secondary">Columns</button>
+        <span id="suburbfinder-row-count" class="toolbar__count"></span>
+      </section>
+      <div id="suburbfinder-querybuilder" class="querybuilder"></div>
+      <p class="subdivision-note">
+        One row per suburb, computed from the full listing history (including the 2-year sold sweep) —
+        not just what's browsable in Data Table. Build a filter below (field / condition / value per row,
+        the left-hand toggle sets AND/OR for that group, "&gt;" nests a condition into a sub-group with the
+        row above it) and save it as a named Strategy to reuse later. Price growth (1mo/6mo/1yr/2yr) compares
+        median sold price across two equal-width windows ending today, e.g. 1yr growth is the last ~6 months
+        vs the ~6 months before that — 1mo especially will be blank for lower-volume suburbs, since it needs
+        3+ dated sales on each side of a ~2-week split. See <code>suburb_columns</code> in
+        <code>config.yaml</code> for the full methodology, and the Data Definitions tab for what every column
+        here means.
+      </p>
 
-    <div id="suburb-table"></div>
+      <div id="suburb-table"></div>
+    </div>
   </section>
 
   <section id="tab-subdivision" class="tab-panel">
-    <section class="toolbar toolbar--wrap">
-      <div id="subdivision-filters" class="toolbar__filters"></div>
-      <div id="subdivision-params" class="toolbar__params"></div>
-      <button id="subdivision-clear-filters" class="btn btn--ghost">Clear filters</button>
-      <span id="subdivision-row-count" class="toolbar__count"></span>
-    </section>
-    <p class="subdivision-note">
-      Suburbs with at least one currently-For-Sale block worth subdividing at a profit,
-      ranked by a profitability index (best opportunity's profit × confidence). Resale value
-      per new lot comes from actual recent vacant-land sales near the resulting lot size — not
-      a fixed assumption. Subdivision cost and stamp duty buffer are yours to set above;
-      profit and rankings update live. Click a suburb to see its listings, and click a listing
-      to see the comparables used. See <code>references/subdivision/context.md</code> for the
-      full methodology.
-    </p>
+    <div class="pt-shell">
+      <section class="toolbar toolbar--wrap">
+        <div id="subdivision-filters" class="toolbar__filters"></div>
+        <div id="subdivision-params" class="toolbar__params"></div>
+        <button id="subdivision-clear-filters" class="btn btn--ghost">Clear filters</button>
+        <span id="subdivision-row-count" class="toolbar__count"></span>
+      </section>
+      <p class="subdivision-note">
+        Suburbs with at least one currently-For-Sale block worth subdividing at a profit,
+        ranked by a profitability index (best opportunity's profit × confidence). Resale value
+        per new lot comes from actual recent vacant-land sales near the resulting lot size — not
+        a fixed assumption. Subdivision cost and stamp duty buffer are yours to set above;
+        profit and rankings update live. Click a suburb to see its listings, and click a listing
+        to see the comparables used. See <code>references/subdivision/context.md</code> for the
+        full methodology.
+      </p>
 
-    <div id="subdivision-table"></div>
+      <div id="subdivision-table"></div>
+    </div>
   </section>
 
   <section id="tab-datatable" class="tab-panel">
-    <section class="toolbar">
-      <input id="search-box" type="text" placeholder="Search address..." class="toolbar__search" />
-      <div id="filters" class="toolbar__filters"></div>
-      <button id="clear-filters" class="btn btn--ghost">Clear filters</button>
-      <button id="column-panel-toggle" class="btn btn--secondary">Columns</button>
-      <span id="row-count" class="toolbar__count"></span>
-    </section>
+    <div class="pt-shell">
+      <section class="toolbar">
+        <input id="search-box" type="text" placeholder="Search address..." class="toolbar__search" />
+        <div id="filters" class="toolbar__filters"></div>
+        <button id="clear-filters" class="btn btn--ghost">Clear filters</button>
+        <button id="column-panel-toggle" class="btn btn--secondary">Columns</button>
+        <span id="row-count" class="toolbar__count"></span>
+      </section>
 
-    <div id="property-table"></div>
+      <div id="property-table"></div>
+    </div>
   </section>
 
   <section id="tab-definitions" class="tab-panel">
-    <p class="subdivision-note">
-      Every column in the Data Table tab, what it means, and how it's calculated (where it's
-      a calculated value rather than a raw field from the listing).
-    </p>
-    <div id="definitions-list"></div>
+    <div class="pt-shell">
+      <p class="subdivision-note">
+        Every column in the Data Table tab, what it means, and how it's calculated (where it's
+        a calculated value rather than a raw field from the listing).
+      </p>
+      <div id="definitions-list"></div>
+    </div>
   </section>
 
   <div id="subdivision-modal" class="modal-overlay" hidden>
