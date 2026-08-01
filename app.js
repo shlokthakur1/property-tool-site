@@ -801,6 +801,7 @@ const QB_OPERATORS = {
     { op: "eq", label: "Equals" },
     { op: "neq", label: "Not equals" },
     { op: "in", label: "Is any of" },
+    { op: "notin", label: "Is none of" },
     { op: "contains", label: "Contains" },
     { op: "empty", label: "Is empty" },
     { op: "notempty", label: "Is not empty" },
@@ -870,6 +871,10 @@ function qbRuleMatches(row, rule, fieldMap) {
     const set = Array.isArray(rule.value) ? rule.value : [];
     return set.length === 0 || set.includes(strValue);
   }
+  if (rule.operator === "notin") {
+    const set = Array.isArray(rule.value) ? rule.value : [];
+    return set.length === 0 || !set.includes(strValue);
+  }
   const cmp = rule.value == null ? "" : String(rule.value);
   if (cmp === "") return true; // no comparison value entered yet
   switch (rule.operator) {
@@ -892,7 +897,7 @@ function qbFormatValue(rule, meta) {
   if (meta?.type === "number") {
     return rule.operator === "between" ? `${rule.value ?? "…"}–${rule.value2 ?? "…"}` : (rule.value ?? "…");
   }
-  if (rule.operator === "in") {
+  if (rule.operator === "in" || rule.operator === "notin") {
     return Array.isArray(rule.value) && rule.value.length ? rule.value.join("/") : "…";
   }
   return rule.value || "…";
@@ -998,7 +1003,7 @@ function qbRenderValueControl(rule, meta, onChange) {
     return wrap;
   }
 
-  if (meta.type === "categorical" && rule.operator === "in") {
+  if (meta.type === "categorical" && (rule.operator === "in" || rule.operator === "notin")) {
     if (!Array.isArray(rule.value)) rule.value = [];
     const selectedSet = new Set(rule.value);
     const { wrapper } = createMultiSelect(rule.field, "Select values", meta.options || [], selectedSet, () => {
@@ -1335,6 +1340,7 @@ function createStrategiesPanel(container, qb) {
 // ─────────────────────────────────────────────────────────────────────────────
 const SUBURB_CATEGORICAL_FIELDS = new Set([
   "suburb", "state", "postcode", "zone", "data_confidence", "growth_rate_cycle_house", "growth_rate_cycle_unit",
+  "top_industry_1", "top_industry_2", "top_industry_3",
 ]);
 const SUBURB_MONEY_FIELDS = new Set([
   "non_res_building_approvals_value_fy", "infrastructure_spend_per_capita",
