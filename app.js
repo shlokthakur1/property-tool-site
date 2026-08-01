@@ -1597,14 +1597,49 @@ function buildCompareTable(rows, columnsCfg) {
 }
 
 // One shared modal, reused by every table that wires up compare (Explore
-// suburbs, Shortlist) — only one can be open at a time anyway.
+// suburbs, Shortlist) — only one can be open at a time anyway. compareModalState
+// tracks whatever's currently rendered in it, so the Download Excel button
+// (also shared) can export the exact rows/columns on screen regardless of
+// which table's Compare button opened it.
+let compareModalState = null; // { rows, columnsCfg }
+
+function downloadCompareExcel(rows, columnsCfg) {
+  const groups = [];
+  const byName = new Map();
+  columnsCfg.forEach((col) => {
+    if (!byName.has(col.group)) {
+      const g = { name: col.group || "Other", cols: [] };
+      byName.set(col.group, g);
+      groups.push(g);
+    }
+    byName.get(col.group).cols.push(col);
+  });
+
+  const aoa = [["Metric", ...rows.map((r) => `${r.suburb}, ${r.state}`)]];
+  groups.forEach((g) => {
+    aoa.push([g.name]);
+    g.cols.forEach((col) => {
+      aoa.push([col.title, ...rows.map((r) => compareFormatValue(columnsCfg, col.field, r[col.field]))]);
+    });
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Comparison");
+  XLSX.writeFile(wb, "suburb-comparison.xlsx");
+}
+
 function wireCompareModalClose() {
   const modal = document.getElementById("compare-modal");
   const closeBtn = document.getElementById("compare-modal-close");
+  const downloadBtn = document.getElementById("compare-download-xlsx");
   const close = () => { modal.hidden = true; };
   closeBtn.addEventListener("click", close);
   modal.addEventListener("click", (e) => {
     if (e.target === modal) close();
+  });
+  downloadBtn.addEventListener("click", () => {
+    if (compareModalState) downloadCompareExcel(compareModalState.rows, compareModalState.columnsCfg);
   });
 }
 
@@ -1620,6 +1655,7 @@ function wireCompareFeature(table, columnsCfg, toggleBtnId) {
 
   toggleBtn.addEventListener("click", () => {
     const selected = table.getSelectedData();
+    compareModalState = { rows: selected, columnsCfg };
     modalBody.innerHTML = buildCompareTable(selected, columnsCfg);
     modal.hidden = false;
   });
@@ -2538,10 +2574,6 @@ async function main() {
       table.setFilter(rowMatchesFilters);
     }, 200)
   );
-
-  document.getElementById("download-csv").addEventListener("click", () => {
-    table.download("csv", "properties.csv");
-  });
 
   document.getElementById("download-xlsx").addEventListener("click", () => {
     table.download("xlsx", "properties.xlsx", { sheetName: "Properties" });

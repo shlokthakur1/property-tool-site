@@ -18,7 +18,6 @@
       <p id="site-meta" class="app-header__meta"></p>
     </div>
     <div class="app-header__actions">
-      <button id="download-csv" class="btn btn--secondary">Download CSV</button>
       <button id="download-xlsx" class="btn btn--primary">Download Excel</button>
     </div>
   </header>
@@ -219,7 +218,10 @@
     <div class="modal-dialog modal-dialog--wide">
       <div class="modal-header">
         <h3>Compare suburbs</h3>
-        <button id="compare-modal-close" class="btn btn--ghost" aria-label="Close">✕</button>
+        <div class="modal-header__actions">
+          <button id="compare-download-xlsx" class="btn btn--secondary">Download Excel</button>
+          <button id="compare-modal-close" class="btn btn--ghost" aria-label="Close">✕</button>
+        </div>
       </div>
       <div id="compare-modal-body" class="modal-body"></div>
     </div>

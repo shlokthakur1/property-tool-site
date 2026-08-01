@@ -599,6 +599,13 @@ a:hover {
   color: var(--text);
 }
 
+.modal-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .modal-body {
   padding: 16px 24px 24px;
   overflow-y: auto;
