@@ -151,6 +151,44 @@ function buildColumnDef(col) {
         },
       };
     }
+    if (col.field === "height_limit_m") {
+      return {
+        ...base,
+        sorter: "number",
+        hozAlign: "right",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          return value == null ? "" : `${value.toFixed(0)} m`;
+        },
+      };
+    }
+    if (col.field === "floor_space_ratio") {
+      return {
+        ...base,
+        sorter: "number",
+        hozAlign: "right",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          return value == null ? "" : `${value.toFixed(2)}:1`;
+        },
+      };
+    }
+    if (
+      col.field === "mining_employment_pct" ||
+      col.field === "top_industry_1_pct" ||
+      col.field === "top_industry_2_pct" ||
+      col.field === "top_industry_3_pct"
+    ) {
+      return {
+        ...base,
+        sorter: "number",
+        hozAlign: "right",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          return value == null ? "" : `${value.toFixed(1)}%`;
+        },
+      };
+    }
     return base;
 }
 
@@ -473,11 +511,19 @@ function buildSuburbGroups(listings, params) {
       bestConfidence: best.confidence,
       index: best.index,
       opportunityCount: items.length,
+      typicalLandSizeM2: median(items.map((i) => i.land_size_m2).filter((v) => v != null)),
       listings: items,
     });
   }
   groups.sort((a, b) => b.index - a.index);
   return groups;
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 function formatMoney(value) {
@@ -497,6 +543,13 @@ function buildSuburbColumns() {
       formatter: (cell) => {
         const value = cell.getValue();
         return `<span class="profit-positive">+${formatMoney(value)}</span>`;
+      },
+    },
+    {
+      field: "typicalLandSizeM2", title: "Typical Land Size", sorter: "number", hozAlign: "right", width: 140,
+      formatter: (cell) => {
+        const value = cell.getValue();
+        return value == null ? "" : `${Math.round(value).toLocaleString()} m²`;
       },
     },
     {
@@ -1361,6 +1414,29 @@ function buildSuburbColumnDef(col) {
       return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
         return v == null ? "" : Math.round(v).toLocaleString();
+      } };
+    }
+    if (col.field === "height_limit_m") {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `${v.toFixed(0)} m`;
+      } };
+    }
+    if (col.field === "floor_space_ratio") {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `${v.toFixed(2)}:1`;
+      } };
+    }
+    if (
+      col.field === "mining_employment_pct" ||
+      col.field === "top_industry_1_pct" ||
+      col.field === "top_industry_2_pct" ||
+      col.field === "top_industry_3_pct"
+    ) {
+      return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+        const v = cell.getValue();
+        return v == null ? "" : `${v.toFixed(1)}%`;
       } };
     }
     if (col.field === "state") return { ...base, width: 80 };
