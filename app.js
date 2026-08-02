@@ -270,7 +270,7 @@ function rowMatchesFilters(row) {
 
 function closeAllPanels(except) {
   document.querySelectorAll(
-    ".multiselect__panel.is-open, .strategies-dropdown__panel.is-open, .score-settings__panel.is-open"
+    ".multiselect__panel.is-open, .strategies-dropdown__panel.is-open"
   ).forEach((panel) => {
     if (panel !== except) panel.classList.remove("is-open");
   });
@@ -1509,6 +1509,13 @@ function buildSuburbColumnDef(col) {
         return v == null ? "" : `${v.toFixed(1)}x`;
       } };
     }
+    if (SUBURB_SCORE_FIELDS.has(col.field)) {
+      return { ...base, sorter: "number", hozAlign: "right", width: 70, formatter: (cell) => {
+        const v = cell.getValue();
+        if (v == null) return "";
+        return `<span class="pt-score ${scoreColorClass(v)}">${Math.round(v)}</span>`;
+      } };
+    }
     if (col.field === "state") return { ...base, width: 80 };
     return { ...base, sorter: "number" };
 }
@@ -1673,145 +1680,27 @@ function buildSelectionColumn() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Investment Score — deliberately NOT a black-box number. Every component is
-// a real column already visible elsewhere in this app, normalised to a 0-100
-// percentile rank against every other suburb (so a 5% yield means the same
-// thing regardless of the raw metric's units), then combined as a weighted
-// average using weights the user sets themselves (persisted, defaulting to
-// an even-ish split) — see the "Score weights" panel. A suburb missing one
-// component (e.g. no IRSAD match) just has that component skipped and the
-// remaining weights renormalised, rather than being penalised for missing data.
+// Investment Score — Capital Growth / Cashflow / Lower Risk / Overall, each
+// 0-100, computed server-side (build_site.py: add_composite_scores) using a
+// fixed weighting we chose ourselves, inspired by HtAG Analytics' published
+// Relative Composite Score structure — deliberately NOT user-adjustable (see
+// config.yaml's "Investment Score" suburb_columns group for the exact
+// weights and the honest gaps vs HtAG's own metric list). They arrive as
+// plain suburb_columns fields, same as any other metric — no client-side
+// computation needed here at all.
 // ─────────────────────────────────────────────────────────────────────────────
-const SCORE_COMPONENTS = [
-  { key: "yield", field: "gross_rental_yield_pct_house", label: "Rental yield (House)", direction: 1, defaultWeight: 25 },
-  { key: "growth", field: "price_growth_1yr_pct_house", label: "Price growth 1yr (House)", direction: 1, defaultWeight: 25 },
-  { key: "popGrowth", field: "population_change_pct_5yr", label: "Population growth (5yr)", direction: 1, defaultWeight: 15 },
-  { key: "irsad", field: "irsad_aus_decile", label: "IRSAD decile", direction: 1, defaultWeight: 15 },
-  { key: "supply", field: "months_of_supply", label: "Months of supply (lower = tighter market)", direction: -1, defaultWeight: 10 },
-  { key: "afford", field: "affordability_index_house", label: "Affordability Index (lower = more affordable)", direction: -1, defaultWeight: 10 },
-];
-const SCORE_WEIGHTS_STORAGE_KEY = "propertyTool.investmentScoreWeights.v1";
+const SUBURB_SCORE_FIELDS = new Set([
+  "capital_growth_score_house", "capital_growth_score_unit",
+  "cashflow_score_house", "cashflow_score_unit",
+  "lower_risk_score_house", "lower_risk_score_unit",
+  "overall_score_house", "overall_score_unit",
+]);
 
-function loadScoreWeights() {
-  const defaults = {};
-  SCORE_COMPONENTS.forEach((c) => (defaults[c.key] = c.defaultWeight));
-  try {
-    const raw = localStorage.getItem(SCORE_WEIGHTS_STORAGE_KEY);
-    return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
-  } catch {
-    return defaults;
-  }
-}
-
-function saveScoreWeights(weights) {
-  try {
-    localStorage.setItem(SCORE_WEIGHTS_STORAGE_KEY, JSON.stringify(weights));
-  } catch {
-    // localStorage unavailable — weights just won't persist across reloads
-  }
-}
-
-// Percentile rank (0-100) of each value within its own component's
-// distribution, direction-adjusted so "100" always means "favourable for
-// this score" regardless of whether the raw metric is better high or low.
-function computePercentileRanks(rows) {
-  const ranks = new Map(); // field -> Map(rowIndex -> percentile 0-100)
-  SCORE_COMPONENTS.forEach(({ field, direction }) => {
-    const withValue = rows
-      .map((row, i) => ({ i, v: row[field] }))
-      .filter((r) => r.v != null && !Number.isNaN(r.v));
-    withValue.sort((a, b) => a.v - b.v);
-    const n = withValue.length;
-    const fieldRanks = new Map();
-    withValue.forEach((r, sortedIndex) => {
-      const pct = n <= 1 ? 100 : (sortedIndex / (n - 1)) * 100;
-      fieldRanks.set(r.i, direction === 1 ? pct : 100 - pct);
-    });
-    ranks.set(field, fieldRanks);
-  });
-  return ranks;
-}
-
-function computeInvestmentScores(rows, ranks, weights) {
-  rows.forEach((row, i) => {
-    let weightedSum = 0;
-    let totalWeight = 0;
-    SCORE_COMPONENTS.forEach(({ key, field }) => {
-      const pct = ranks.get(field).get(i);
-      if (pct == null) return;
-      const w = Math.max(0, Number(weights[key]) || 0);
-      weightedSum += pct * w;
-      totalWeight += w;
-    });
-    row.investmentScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : null;
-  });
-}
-
-function createScoreSettingsPanel(toggleBtn, panel, weights, onChange) {
-  function render() {
-    panel.innerHTML = "";
-    const intro = document.createElement("p");
-    intro.className = "score-settings__intro";
-    intro.textContent = "Investment Score blends these columns (each ranked 0-100 against every other suburb) using the weights below — adjust to match what you actually care about. Set a weight to 0 to drop a component entirely.";
-    panel.appendChild(intro);
-
-    SCORE_COMPONENTS.forEach(({ key, label }) => {
-      const row = document.createElement("div");
-      row.className = "score-settings__row";
-
-      const labelEl = document.createElement("label");
-      labelEl.textContent = label;
-      labelEl.htmlFor = `score-weight-${key}`;
-
-      const input = document.createElement("input");
-      input.type = "range";
-      input.id = `score-weight-${key}`;
-      input.min = "0";
-      input.max = "100";
-      input.value = weights[key];
-
-      const output = document.createElement("output");
-      output.textContent = weights[key];
-
-      input.addEventListener("input", debounce(() => {
-        weights[key] = Number(input.value);
-        output.textContent = input.value;
-        saveScoreWeights(weights);
-        onChange();
-      }, 150));
-      input.addEventListener("input", () => { output.textContent = input.value; });
-
-      row.appendChild(labelEl);
-      row.appendChild(input);
-      row.appendChild(output);
-      panel.appendChild(row);
-    });
-
-    const actions = document.createElement("div");
-    actions.className = "score-settings__actions";
-    const resetBtn = document.createElement("button");
-    resetBtn.type = "button";
-    resetBtn.className = "btn btn--ghost";
-    resetBtn.textContent = "Reset to defaults";
-    resetBtn.addEventListener("click", () => {
-      SCORE_COMPONENTS.forEach((c) => (weights[c.key] = c.defaultWeight));
-      saveScoreWeights(weights);
-      render();
-      onChange();
-    });
-    actions.appendChild(resetBtn);
-    panel.appendChild(actions);
-  }
-
-  render();
-  toggleBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const isOpen = panel.classList.contains("is-open");
-    closeAllPanels();
-    if (!isOpen) panel.classList.add("is-open");
-  });
-  panel.addEventListener("click", (e) => e.stopPropagation());
-  document.addEventListener("click", () => panel.classList.remove("is-open"));
+function scoreColorClass(value) {
+  if (value == null) return "";
+  if (value >= 70) return "pt-score-high";
+  if (value >= 40) return "pt-score-mid";
+  return "pt-score-low";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1983,34 +1872,13 @@ function buildSuburbFinderTab(payload) {
   const suburbs = payload.suburbs;
   if (!suburbs) return null;
 
-  const scoreWeights = loadScoreWeights();
-  const scoreRanks = computePercentileRanks(suburbs.rows);
-  computeInvestmentScores(suburbs.rows, scoreRanks, scoreWeights);
-
-  // A factory, not a shared object — Tabulator attaches internal state to
-  // column def objects, so the same literal can't safely be reused across
-  // two separate table instances (same reasoning as buildGroupedSuburbColumns
-  // building fresh defs per call).
-  function buildScoreColumn() {
-    return {
-      title: "Investment Score",
-      columns: [{
-        field: "investmentScore", title: "Score", sorter: "number", hozAlign: "right", width: 90,
-        formatter: (cell) => {
-          const v = cell.getValue();
-          return v == null ? "" : String(v);
-        },
-      }],
-    };
-  }
-
   wireCompareModalClose();
   const activeShortlist = loadActiveShortlist();
 
   // ── Explore suburbs ─────────────────────────────────────────────────────
   const exploreTable = new Tabulator("#suburb-table", {
     data: suburbs.rows,
-    columns: [buildSelectionColumn(), buildScoreColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
+    columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
     layout: "fitDataFill",
     height: "calc(100vh - 400px)",
     pagination: true,
@@ -2056,7 +1924,7 @@ function buildSuburbFinderTab(payload) {
 
   const shortlistTable = new Tabulator("#shortlist-table", {
     data: shortlistRows(),
-    columns: [buildSelectionColumn(), buildScoreColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
+    columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
     layout: "fitDataFill",
     height: "calc(100vh - 400px)",
     pagination: true,
@@ -2109,22 +1977,6 @@ function buildSuburbFinderTab(payload) {
   });
   shortlistTable.on("dataFiltered", () => updateRowCount(shortlistTable, "shortlist-row-count", "suburbs"));
   shortlistTable.on("renderComplete", () => updateRowCount(shortlistTable, "shortlist-row-count", "suburbs"));
-
-  // ── Shared: Investment Score weights redraw both tables; sub-tab switch ──
-  createScoreSettingsPanel(
-    document.getElementById("suburbfinder-score-toggle"),
-    document.getElementById("suburbfinder-score-panel"),
-    scoreWeights,
-    () => {
-      // Mutates the same row objects both tables hold as `data` (Explore
-      // holds the full array, Shortlist a filtered subset of the same
-      // objects), so a forced redraw on each — not setData/updateData,
-      // which need an id-keyed match — is enough to re-render.
-      computeInvestmentScores(suburbs.rows, scoreRanks, scoreWeights);
-      exploreTable.redraw(true);
-      shortlistTable.redraw(true);
-    }
-  );
 
   setupSubTabs(document.getElementById("tab-suburbfinder"), { explore: exploreTable, shortlist: shortlistTable });
 

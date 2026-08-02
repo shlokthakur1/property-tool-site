@@ -858,69 +858,31 @@ a:hover {
   color: var(--text-muted);
 }
 
-/* Investment Score weight settings (Suburb Finder toolbar) */
-.score-settings {
-  position: relative;
-}
-
-.score-settings__panel {
-  display: none;
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
-  width: 360px;
-  max-height: 420px;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-dropdown);
-  padding: 14px;
-}
-
-.score-settings__panel.is-open {
-  display: block;
-}
-
-.score-settings__intro {
-  font-size: 12.5px;
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin: 0 0 12px;
-}
-
-.score-settings__row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-}
-
-.score-settings__row label {
-  flex: 1 1 auto;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.score-settings__row input[type="range"] {
-  flex: 0 0 120px;
-}
-
-.score-settings__row output {
-  flex: 0 0 34px;
-  text-align: right;
-  font-size: 12.5px;
-  color: var(--text-muted);
+/* Investment Score badges (Capital Growth / Cashflow / Lower Risk / Overall)
+   — fixed server-side scores, no user weight panel any more. */
+.pt-score {
+  display: inline-block;
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
-.score-settings__actions {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
+.pt-score-high {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.pt-score-mid {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.pt-score-low {
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 /* Cashflow tab */
