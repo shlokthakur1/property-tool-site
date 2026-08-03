@@ -458,27 +458,24 @@ function updateRowCount(table, countEl, noun) {
 // Subdivision tab — a suburb-level opportunity finder. Each listing in
 // payload.subdivision.listings is a currently-For-Sale block big enough to
 // subdivide, with a comp-backed resale estimate already computed at build
-// time (see build_site.py build_subdivision_listings). Cost-per-lot and
-// stamp duty are live-adjustable here, so profit — and therefore which
-// suburbs even qualify — is computed entirely client-side and recomputed on
-// every parameter/filter change.
+// time (see build_site.py build_subdivision_listings). Cost/selling/holding
+// assumptions are live-adjustable in the Assumptions panel, so profit — and
+// therefore which suburbs even qualify — is computed entirely client-side
+// and recomputed on every assumption/filter change. Filtering reuses the
+// same hTag-style AND/OR query builder + Saved Strategies as Suburb Finder
+// (see createQueryBuilder below), just run against individual candidate
+// listings rather than pre-aggregated rows, since grouping itself depends
+// on the live assumptions.
 // ─────────────────────────────────────────────────────────────────────────────
-const SUBDIVISION_MULTI_FIELDS = [{ field: "state", label: "State" }];
-const SUBDIVISION_RANGE_FIELDS = [
-  { field: "land_size_m2", label: "Land (m²)" },
-  { field: "price", label: "Price" },
-];
-
-const subdivisionFilterState = { multi: {}, range: {} };
-SUBDIVISION_MULTI_FIELDS.forEach((f) => (subdivisionFilterState.multi[f.field] = new Set()));
-SUBDIVISION_RANGE_FIELDS.forEach((f) => (subdivisionFilterState.range[f.field] = { min: null, max: null }));
-
-const subdivisionParams = { costPerLot: 0, stampDutyBufferPct: 0 };
+const subdivisionParams = { costPerLot: 0, stampDutyBufferPct: 0, sellingCostsPct: 0, holdingCostsPct: 0 };
 
 function computeProfit(listing, params) {
-  const cost = listing.price + params.costPerLot * listing.lots_possible
-    + listing.price * (params.stampDutyBufferPct / 100);
-  return listing.est_total_revenue - cost;
+  const subdivisionCost = params.costPerLot * listing.lots_possible;
+  const stampDuty = listing.price * (params.stampDutyBufferPct / 100);
+  const holdingCost = listing.price * (params.holdingCostsPct / 100);
+  const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost;
+  const sellingCost = listing.est_total_revenue * (params.sellingCostsPct / 100);
+  return listing.est_total_revenue - sellingCost - totalCost;
 }
 
 function confidenceLabel(confidence) {
@@ -487,50 +484,80 @@ function confidenceLabel(confidence) {
   return "Low";
 }
 
-function listingMatchesFilters(listing) {
-  const selectedStates = subdivisionFilterState.multi.state;
-  if (selectedStates.size > 0 && !selectedStates.has(String(listing.state ?? ""))) return false;
-  for (const { field } of SUBDIVISION_RANGE_FIELDS) {
-    const { min, max } = subdivisionFilterState.range[field];
-    const value = listing[field];
-    if (min != null && (value == null || value < min)) return false;
-    if (max != null && (value == null || value > max)) return false;
+// Fraction of `sortedValues` at or below `value` — the same rank(pct=True)
+// percentile-rank technique build_site.py uses for the suburb Investment
+// Score, just computed client-side since this population (suburbs with at
+// least one profitable opportunity under the CURRENT live assumptions)
+// changes on every filter/assumption change.
+function percentileRank(sortedValues, value) {
+  if (!sortedValues.length || value == null) return 0;
+  let lo = 0, hi = sortedValues.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedValues[mid] <= value) lo = mid + 1;
+    else hi = mid;
   }
-  return true;
+  return lo / sortedValues.length;
 }
 
-// Groups profitable (after live params), filter-matching listings by
-// suburb+state. A suburb's displayed profit/confidence are its single best
-// opportunity's own numbers — that's the one an investor would actually
-// pursue — with the rest of the suburb's opportunities available on drill-in.
-function buildSuburbGroups(listings, params) {
+// Groups profitable (after live assumptions), filter-matching listings by
+// suburb+state. A suburb's headline profit/confidence/best-opportunity
+// detail columns are its single best opportunity's own numbers — that's
+// the one an investor would actually pursue — with the rest of the
+// suburb's opportunities available on drill-in.
+//
+// Opportunity Score is our own composite ranking (requested as "based on
+// number of opportunities, best est. profit & data confidence", no fixed
+// weights given) — 50% best profit, 30% opportunity count, 20% data
+// confidence. Profit gets the largest weight since it's the actual dollar
+// upside; opportunity count is a secondary signal (a suburb with many
+// candidates is a richer hunting ground, not reliant on one lucky find);
+// confidence tempers both so a huge-but-shaky estimate doesn't outrank a
+// smaller, well-evidenced one. Profit and count are unbounded and skewed,
+// so both are percentile-ranked against every other qualifying suburb (same
+// technique as the suburb Investment Score); confidence is already a
+// comparable 0-1 fraction, so it's used directly.
+function buildSuburbGroups(listings, params, qb) {
   const bySuburb = new Map();
   for (const listing of listings) {
-    if (!listingMatchesFilters(listing)) continue;
+    if (qb && !qb.matches(listing)) continue;
     const profit = computeProfit(listing, params);
     if (profit <= 0) continue;
     const key = `${listing.suburb}||${listing.state}`;
-    const scored = { ...listing, profit, index: profit * listing.confidence };
+    const scored = { ...listing, profit };
     if (!bySuburb.has(key)) bySuburb.set(key, []);
     bySuburb.get(key).push(scored);
   }
 
   const groups = [];
   for (const items of bySuburb.values()) {
-    items.sort((a, b) => b.index - a.index);
+    items.sort((a, b) => b.profit - a.profit);
     const best = items[0];
     groups.push({
       suburb: best.suburb,
       state: best.state,
+      opportunityCount: items.length,
       bestProfit: best.profit,
       bestConfidence: best.confidence,
-      index: best.index,
-      opportunityCount: items.length,
+      medianLandPriceForSale: median(items.map((i) => i.price).filter((v) => v != null)),
       typicalLandSizeM2: median(items.map((i) => i.land_size_m2).filter((v) => v != null)),
+      bestLotsPossible: best.lots_possible,
+      bestResultingLotM2: best.resulting_lot_m2,
+      bestCompCount: best.comp_count,
+      bestZone: best.zone,
       listings: items,
     });
   }
-  groups.sort((a, b) => b.index - a.index);
+
+  const profitValues = groups.map((g) => g.bestProfit).sort((a, b) => a - b);
+  const countValues = groups.map((g) => g.opportunityCount).sort((a, b) => a - b);
+  groups.forEach((g) => {
+    const profitRank = percentileRank(profitValues, g.bestProfit);
+    const countRank = percentileRank(countValues, g.opportunityCount);
+    g.opportunityScore = Math.round(100 * (0.5 * profitRank + 0.3 * countRank + 0.2 * (g.bestConfidence ?? 0)));
+  });
+
+  groups.sort((a, b) => b.opportunityScore - a.opportunityScore);
   return groups;
 }
 
@@ -545,42 +572,109 @@ function formatMoney(value) {
   return value == null ? "—" : `$${Math.round(value).toLocaleString()}`;
 }
 
-function buildSuburbColumns() {
-  return [
-    { field: "suburb", title: "Suburb", headerFilter: false, frozen: true },
-    { field: "state", title: "State", headerFilter: false, width: 80 },
-    {
-      field: "opportunityCount", title: "Opportunities", sorter: "number", width: 130, hozAlign: "right",
-      formatter: (cell) => cell.getValue().toLocaleString(),
-    },
-    {
-      field: "bestProfit", title: "Best Est. Profit", sorter: "number", hozAlign: "right",
-      formatter: (cell) => {
-        const value = cell.getValue();
-        return `<span class="profit-positive">+${formatMoney(value)}</span>`;
-      },
-    },
-    {
-      field: "typicalLandSizeM2", title: "Typical Land Size", sorter: "number", hozAlign: "right", width: 140,
-      formatter: (cell) => {
-        const value = cell.getValue();
-        return value == null ? "" : `${Math.round(value).toLocaleString()} m²`;
-      },
-    },
-    {
-      field: "bestConfidence", title: "Confidence", sorter: "number", width: 110,
-      formatter: (cell) => {
-        const value = cell.getValue();
-        const label = confidenceLabel(value);
-        return `<span class="confidence-badge confidence-${label.toLowerCase()}">${label}</span>`;
-      },
-    },
-    // Not shown directly (profit + confidence already tell the story), just
-    // the default sort target: best profit weighted by how much evidence
-    // backs its resale estimate, so a shakier huge number doesn't outrank a
-    // smaller, well-supported one.
-    { field: "index", title: "Index", visible: false, sorter: "number" },
-  ];
+// ─────────────────────────────────────────────────────────────────────────────
+// Subdivision table columns — grouped and toggleable like Suburb Finder's
+// (see buildGroupedSuburbColumns/createColumnPanel), driven by this same
+// {field, title, group, description} shape so it can feed both the column
+// panel and the Data Definitions tab. Only these are shown by default (the
+// requested set, plus State since a suburb name alone is ambiguous across
+// states, and Opportunity Score since it's what the table is actually
+// sorted by) — everything else is available via the Columns panel.
+// ─────────────────────────────────────────────────────────────────────────────
+const SUBDIVISION_COLUMNS = [
+  { field: "suburb", title: "Suburb", group: "Identity", description: "Suburb name." },
+  { field: "state", title: "State", group: "Identity", description: "Australian state/territory." },
+  { field: "opportunityScore", title: "Opportunity Score", group: "Opportunity",
+    description: "Our own 0-100 composite ranking — 50% best est. profit, 30% number of opportunities, 20% data confidence. Profit and opportunity count are percentile-ranked against every other suburb with at least one profitable candidate under the current assumptions; confidence is already a 0-1 fraction so it's used directly. This is the table's default sort key.",
+    formula: "round(100 * (0.5 * pctrank(bestProfit) + 0.3 * pctrank(opportunityCount) + 0.2 * bestConfidence))" },
+  { field: "opportunityCount", title: "Subdivision Opportunities", group: "Opportunity",
+    description: "Number of currently-For-Sale blocks in this suburb that are profitable to subdivide under the current assumptions (see the Assumptions panel) and pass the active filters." },
+  { field: "bestProfit", title: "Best Est. Profit", group: "Opportunity",
+    description: "Estimated profit of this suburb's single best opportunity — purchase price plus subdivision cost, stamp duty and holding costs, against comp-backed resale revenue less selling costs. See the Assumptions panel for the live cost inputs, and click a suburb row for the full breakdown." },
+  { field: "bestConfidence", title: "Data Confidence", group: "Opportunity",
+    description: "How many comparable sold vacant-land listings back the best opportunity's resale estimate, 0-1 (shown as a High/Medium/Low badge). Scales linearly between subdivision.min_comparables and subdivision.confidence_comp_target in config.yaml." },
+  { field: "medianLandPriceForSale", title: "Median Price (Land For Sale)", group: "Land For Sale Now",
+    description: "Median asking price across this suburb's currently-For-Sale subdivision-candidate blocks — not all land listings, only ones big enough to subdivide (see references/subdivision/context.md)." },
+  { field: "typicalLandSizeM2", title: "Median Land Size (For Sale)", group: "Land For Sale Now",
+    description: "Median land size (m²) across the same set of currently-For-Sale subdivision-candidate blocks." },
+  { field: "bestLotsPossible", title: "Best Opportunity — Lots Possible", group: "Best Opportunity Detail",
+    description: "Number of new lots the single best opportunity's block can be split into." },
+  { field: "bestResultingLotM2", title: "Best Opportunity — Resulting Lot Size", group: "Best Opportunity Detail",
+    description: "Size (m²) of each new lot the best opportunity would create." },
+  { field: "bestCompCount", title: "Best Opportunity — Comps Used", group: "Best Opportunity Detail",
+    description: "Number of comparable sold vacant-land listings behind the best opportunity's resale estimate." },
+  { field: "bestZone", title: "Best Opportunity — Zone", group: "Best Opportunity Detail",
+    description: "Planning zone of the best opportunity's block, where known." },
+];
+
+const SUBDIVISION_DEFAULT_VISIBLE = new Set([
+  "suburb", "state", "opportunityScore", "opportunityCount", "bestProfit",
+  "medianLandPriceForSale", "typicalLandSizeM2", "bestConfidence",
+]);
+
+function buildSubdivisionColumnDef(col) {
+  const base = { field: col.field, title: col.title, headerFilter: false };
+  if (col.field === "suburb") return { ...base, cssClass: "pt-identity" };
+  if (col.field === "state") return { ...base, width: 80 };
+  if (col.field === "opportunityScore") {
+    return { ...base, sorter: "number", hozAlign: "right", width: 70, formatter: (cell) => {
+      const v = cell.getValue();
+      if (v == null) return "";
+      return `<span class="pt-score ${scoreColorClass(v)}">${Math.round(v)}</span>`;
+    } };
+  }
+  if (col.field === "opportunityCount" || col.field === "bestLotsPossible" || col.field === "bestCompCount") {
+    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+      const v = cell.getValue();
+      return v == null ? "" : v.toLocaleString();
+    } };
+  }
+  if (col.field === "bestProfit") {
+    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+      const v = cell.getValue();
+      return v == null ? "" : `<span class="profit-positive">+${formatMoney(v)}</span>`;
+    } };
+  }
+  if (col.field === "bestConfidence") {
+    return { ...base, sorter: "number", width: 110, formatter: (cell) => {
+      const v = cell.getValue();
+      if (v == null) return "";
+      const label = confidenceLabel(v);
+      return `<span class="confidence-badge confidence-${label.toLowerCase()}">${label}</span>`;
+    } };
+  }
+  if (col.field === "medianLandPriceForSale") {
+    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => formatMoney(cell.getValue()) };
+  }
+  if (col.field === "typicalLandSizeM2" || col.field === "bestResultingLotM2") {
+    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+      const v = cell.getValue();
+      return v == null ? "" : `${Math.round(v).toLocaleString()} m²`;
+    } };
+  }
+  return { ...base, sorter: "string" };
+}
+
+// Same grouped-header wrapping as buildGroupedSuburbColumns (Suburb Finder)
+// — one spanning parent header per `group`, in first-seen order.
+function buildGroupedSubdivisionColumns(columnsCfg) {
+  const groups = [];
+  const byName = new Map();
+  columnsCfg.forEach((col) => {
+    const groupName = col.group || "Other";
+    const isFirstInNewGroup = !byName.has(groupName);
+    if (isFirstInNewGroup) {
+      const groupDef = { title: groupName, columns: [] };
+      byName.set(groupName, groupDef);
+      groups.push(groupDef);
+    }
+    const colDef = buildSubdivisionColumnDef(col);
+    if (isFirstInNewGroup && groups.length > 1) {
+      colDef.cssClass = [colDef.cssClass, "pt-group-start"].filter(Boolean).join(" ");
+    }
+    byName.get(groupName).columns.push(colDef);
+  });
+  return groups;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -608,15 +702,21 @@ function renderCompsTable(comps) {
 function renderListingDetail(listing, params) {
   const subdivisionCost = params.costPerLot * listing.lots_possible;
   const stampDuty = listing.price * (params.stampDutyBufferPct / 100);
-  const totalCost = listing.price + subdivisionCost + stampDuty;
+  const holdingCost = listing.price * (params.holdingCostsPct / 100);
+  const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost;
+  const sellingCost = listing.est_total_revenue * (params.sellingCostsPct / 100);
+  const netRevenue = listing.est_total_revenue - sellingCost;
   return `
     <div class="listing-detail">
       <div class="listing-detail__calc">
         <div><span>Purchase price</span><span>${formatMoney(listing.price)}</span></div>
         <div><span>Subdivision cost (${listing.lots_possible} × ${formatMoney(params.costPerLot)})</span><span>${formatMoney(subdivisionCost)}</span></div>
-        <div><span>Stamp duty buffer (${params.stampDutyBufferPct}%)</span><span>${formatMoney(stampDuty)}</span></div>
+        <div><span>Stamp duty (${params.stampDutyBufferPct}%)</span><span>${formatMoney(stampDuty)}</span></div>
+        <div><span>Holding costs (${params.holdingCostsPct}% of price)</span><span>${formatMoney(holdingCost)}</span></div>
         <div class="listing-detail__total"><span>Total cost</span><span>${formatMoney(totalCost)}</span></div>
         <div><span>Comp median price × ${listing.lots_possible} lots</span><span>${formatMoney(listing.est_total_revenue)}</span></div>
+        <div><span>Selling costs (${params.sellingCostsPct}% of revenue)</span><span>-${formatMoney(sellingCost)}</span></div>
+        <div><span>Net revenue</span><span>${formatMoney(netRevenue)}</span></div>
         <div class="listing-detail__total"><span>Estimated profit</span><span class="profit-positive">+${formatMoney(listing.profit)}</span></div>
       </div>
       <h4>Comparables used (${listing.comp_count}, ${confidenceLabel(listing.confidence)} confidence)</h4>
@@ -673,101 +773,168 @@ function closeSubdivisionModal() {
   document.getElementById("subdivision-modal").hidden = true;
 }
 
-function buildSubdivisionFilterControls(listings, refresh) {
-  const container = document.getElementById("subdivision-filters");
-
-  const multiSelectRefreshers = [];
-  const rangeResetters = [];
-
-  SUBDIVISION_MULTI_FIELDS.forEach(({ field, label }) => {
-    const options = distinctValues(listings, field);
-    const { wrapper, refresh: refreshSelect } = createMultiSelect(
-      field, label, options, subdivisionFilterState.multi[field], refresh
-    );
-    multiSelectRefreshers.push(refreshSelect);
-    container.appendChild(wrapper);
-  });
-
-  SUBDIVISION_RANGE_FIELDS.forEach(({ field, label }) => {
-    const { wrapper, reset } = createRangeFilter(label, (min, max) => {
-      subdivisionFilterState.range[field] = { min, max };
-      refresh();
-    });
-    rangeResetters.push(reset);
-    container.appendChild(wrapper);
-  });
-
-  document.getElementById("subdivision-clear-filters").addEventListener("click", () => {
-    SUBDIVISION_MULTI_FIELDS.forEach(({ field }) => subdivisionFilterState.multi[field].clear());
-    SUBDIVISION_RANGE_FIELDS.forEach(({ field }) => (subdivisionFilterState.range[field] = { min: null, max: null }));
-    multiSelectRefreshers.forEach((r) => r());
-    rangeResetters.forEach((r) => r());
-    refresh();
-  });
+// ─────────────────────────────────────────────────────────────────────────────
+// Filter field catalog for Subdivision's query builder — driven off
+// individual candidate LISTINGS (not suburb groups), since filtering has to
+// happen before grouping/scoring (which itself depends on the live
+// assumptions). Deliberately a small, listing-level subset of what a
+// candidate actually has, not every raw field.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildSubdivisionFieldCatalog(listings) {
+  const fields = [
+    { field: "suburb", label: "Suburb", type: "text" },
+    { field: "state", label: "State", type: "categorical" },
+    { field: "zone", label: "Zone", type: "categorical" },
+    { field: "price", label: "Price", type: "number" },
+    { field: "land_size_m2", label: "Land (m²)", type: "number" },
+    { field: "lots_possible", label: "Lots Possible", type: "number" },
+    { field: "confidence", label: "Comp Confidence (0-1)", type: "number" },
+  ];
+  return fields.map((f) => (f.type === "categorical" ? { ...f, options: distinctValues(listings, f.field) } : f));
 }
 
-function buildSubdivisionParamControls(defaults, refresh) {
-  const container = document.getElementById("subdivision-params");
+// ─────────────────────────────────────────────────────────────────────────────
+// Assumptions panel — the cost/margin inputs no listing can capture (real-
+// world subdivision economics, not derivable from data). Cost per lot and
+// stamp duty are the user's own originally-specified figures; selling costs
+// and holding costs are added on top (both affect profit directly, same as
+// the other two) — defaults for all four come from config.yaml's
+// subdivision: block, the two new ones seeded from the "Quick Feasibility
+// Analysis" spreadsheet (see references/subdivision/context.md).
+// ─────────────────────────────────────────────────────────────────────────────
+const SUBDIVISION_ASSUMPTION_FIELDS = [
+  { key: "costPerLot", defaultField: "default_cost_per_lot", fallback: 40000,
+    label: "Subdivision cost per lot ($)", step: 1000,
+    help: "Cost to service each new lot (water/power/gas/sewerage, surveying, compliance) — Charles's own worked example uses $40,000." },
+  { key: "stampDutyBufferPct", defaultField: "default_stamp_duty_buffer_pct", fallback: 5.5,
+    label: "Stamp duty (%)", step: 0.1,
+    help: "Applied to the purchase price. Varies by state and land value — 5.5% is a reasonable buffer across most states." },
+  { key: "sellingCostsPct", defaultField: "default_selling_costs_pct", fallback: 2.5,
+    label: "Selling costs (%)", step: 0.1,
+    help: "Agent commission and marketing when the new lots are resold — applied to total resale revenue." },
+  { key: "holdingCostsPct", defaultField: "default_holding_costs_pct", fallback: 5.0,
+    label: "Holding costs (%)", step: 0.1,
+    help: "Interest/finance costs over the subdivision period — applied to the purchase price, same as the \"Quick Feasibility Analysis\" spreadsheet's ~5% over 12 months." },
+];
 
-  const costInput = document.createElement("input");
-  costInput.type = "number";
-  costInput.className = "paramfilter__input";
-  costInput.value = defaults.default_cost_per_lot ?? 40000;
-  subdivisionParams.costPerLot = Number(costInput.value) || 0;
+function buildSubdivisionAssumptionsPanel(defaults, refresh) {
+  const body = document.getElementById("subdivision-assumptions-body");
+  body.innerHTML = "";
 
-  const stampInput = document.createElement("input");
-  stampInput.type = "number";
-  stampInput.step = "0.1";
-  stampInput.className = "paramfilter__input";
-  stampInput.value = defaults.default_stamp_duty_buffer_pct ?? 5.5;
-  subdivisionParams.stampDutyBufferPct = Number(stampInput.value) || 0;
+  const grid = document.createElement("div");
+  grid.className = "assumptions-grid";
 
-  const recompute = debounce(() => {
-    subdivisionParams.costPerLot = Number(costInput.value) || 0;
-    subdivisionParams.stampDutyBufferPct = Number(stampInput.value) || 0;
+  const inputs = {};
+  SUBDIVISION_ASSUMPTION_FIELDS.forEach((f) => {
+    const field = document.createElement("div");
+    field.className = "assumptions-field";
+
+    const label = document.createElement("label");
+    label.textContent = f.label;
+    label.htmlFor = `subdivision-assumption-${f.key}`;
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = String(f.step);
+    input.id = `subdivision-assumption-${f.key}`;
+    input.value = defaults[f.defaultField] ?? f.fallback;
+    inputs[f.key] = input;
+
+    const help = document.createElement("p");
+    help.className = "assumptions-field__help";
+    help.textContent = f.help;
+
+    field.appendChild(label);
+    field.appendChild(input);
+    field.appendChild(help);
+    grid.appendChild(field);
+  });
+  body.appendChild(grid);
+
+  const actions = document.createElement("div");
+  actions.className = "assumptions-actions";
+  const resetBtn = document.createElement("button");
+  resetBtn.type = "button";
+  resetBtn.className = "btn btn--ghost";
+  resetBtn.textContent = "Reset to defaults";
+  actions.appendChild(resetBtn);
+  body.appendChild(actions);
+
+  const apply = debounce(() => {
+    SUBDIVISION_ASSUMPTION_FIELDS.forEach((f) => {
+      subdivisionParams[f.key] = Number(inputs[f.key].value) || 0;
+    });
     refresh();
   }, 200);
-  costInput.addEventListener("input", recompute);
-  stampInput.addEventListener("input", recompute);
 
-  const costLabel = document.createElement("label");
-  costLabel.className = "paramfilter";
-  costLabel.textContent = "Cost per lot ($)";
-  costLabel.appendChild(costInput);
+  SUBDIVISION_ASSUMPTION_FIELDS.forEach((f) => {
+    subdivisionParams[f.key] = Number(inputs[f.key].value) || 0;
+    inputs[f.key].addEventListener("input", apply);
+  });
 
-  const stampLabel = document.createElement("label");
-  stampLabel.className = "paramfilter";
-  stampLabel.textContent = "Stamp duty buffer (%)";
-  stampLabel.appendChild(stampInput);
-
-  container.appendChild(costLabel);
-  container.appendChild(stampLabel);
+  resetBtn.addEventListener("click", () => {
+    SUBDIVISION_ASSUMPTION_FIELDS.forEach((f) => {
+      inputs[f.key].value = defaults[f.defaultField] ?? f.fallback;
+      subdivisionParams[f.key] = Number(inputs[f.key].value) || 0;
+    });
+    refresh();
+  });
 }
 
 function buildSubdivisionTab(payload) {
   const sub = payload.subdivision;
   const listings = sub.listings;
 
-  const table = new Tabulator("#subdivision-table", {
-    data: buildSuburbGroups(listings, subdivisionParams),
-    columns: buildSuburbColumns(),
+  // qb and the Assumptions panel both need to exist (and subdivisionParams
+  // needs real defaults, not the {0,0,0,0} placeholder above) before the
+  // FIRST data computation — Tabulator expects real data in its constructor
+  // options, same as this tab's original implementation; calling
+  // table.setData() synchronously right after construction (before
+  // Tabulator's own async init finishes) silently drops it.
+  let table;
+  const refresh = () => {
+    table.setData(buildSuburbGroups(listings, subdivisionParams, qb));
+  };
+
+  const fieldCatalog = buildSubdivisionFieldCatalog(listings);
+  const qb = createQueryBuilder(document.getElementById("subdivision-querybuilder"), fieldCatalog, {
+    persistKey: "subdivision",
+    onFilterChange: refresh,
+  });
+
+  createStrategiesPanel(document.getElementById("subdivision-strategies"), qb);
+  wireSaveStrategyButton(document.getElementById("subdivision-save-strategy"), qb);
+  document.getElementById("subdivision-clear-filters").addEventListener("click", () => qb.clear());
+
+  buildSubdivisionAssumptionsPanel(sub, refresh);
+  const assumptionsModal = document.getElementById("subdivision-assumptions-modal");
+  document.getElementById("subdivision-assumptions-toggle").addEventListener("click", () => { assumptionsModal.hidden = false; });
+  document.getElementById("subdivision-assumptions-close").addEventListener("click", () => { assumptionsModal.hidden = true; });
+  assumptionsModal.addEventListener("click", (e) => {
+    if (e.target.id === "subdivision-assumptions-modal") assumptionsModal.hidden = true;
+  });
+
+  table = new Tabulator("#subdivision-table", {
+    data: buildSuburbGroups(listings, subdivisionParams, qb),
+    columns: buildGroupedSubdivisionColumns(SUBDIVISION_COLUMNS),
     layout: "fitDataFill",
-    height: "calc(100vh - 320px)",
+    height: "calc(100vh - 360px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
     paginationSizeSelector: [25, 50, 100, 250, 500],
-    initialSort: [{ column: "index", dir: "desc" }],
+    initialSort: [{ column: "opportunityScore", dir: "desc" }],
     placeholder: "No profitable subdivision opportunities match these filters",
   });
 
-  const refresh = () => {
-    table.setData(buildSuburbGroups(listings, subdivisionParams));
-  };
-
   table.on("tableBuilt", () => {
-    buildSubdivisionFilterControls(listings, refresh);
-    buildSubdivisionParamControls(sub, refresh);
+    createColumnPanel(table, SUBDIVISION_COLUMNS, {
+      panel: "subdivision-column-panel", groups: "subdivision-column-panel-groups",
+      toggle: "subdivision-column-panel-toggle", close: "subdivision-column-panel-close",
+      selectAll: "subdivision-column-panel-all", selectNone: "subdivision-column-panel-none",
+      storageKey: "subdivision-hidden-columns",
+      defaultHidden: SUBDIVISION_COLUMNS.map((c) => c.field).filter((f) => !SUBDIVISION_DEFAULT_VISIBLE.has(f)),
+    });
   });
   table.on("rowClick", (e, row) => openSuburbModal(row.getData(), subdivisionParams));
   table.on("dataFiltered", () => updateRowCount(table, "subdivision-row-count", "suburbs"));
@@ -2012,6 +2179,7 @@ function buildDefinitionsTab(payload) {
   if (payload.suburbs) {
     html += `<h3 class="definitions-heading">Suburb Finder</h3>${renderDefinitionsTable(payload.suburbs.columns)}`;
   }
+  html += `<h3 class="definitions-heading">Subdivision</h3>${renderDefinitionsTable(SUBDIVISION_COLUMNS)}`;
   container.innerHTML = html;
 }
 
@@ -2024,12 +2192,13 @@ function buildDefinitionsTab(payload) {
 // just pointed at a different table and column set. Visibility choices
 // persist in localStorage so they survive a reload.
 // ─────────────────────────────────────────────────────────────────────────────
-function loadHiddenColumns(storageKey) {
+function loadHiddenColumns(storageKey, defaultHidden) {
   try {
     const raw = localStorage.getItem(storageKey);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
+    if (raw) return new Set(JSON.parse(raw));
+    return new Set(defaultHidden || []);
   } catch {
-    return new Set();
+    return new Set(defaultHidden || []);
   }
 }
 
@@ -2050,7 +2219,7 @@ function createColumnPanel(table, columnsCfg, ids) {
   const selectNoneBtn = document.getElementById(ids.selectNone);
   if (!panel || !groupsContainer || !toggleBtn) return;
 
-  const hidden = loadHiddenColumns(ids.storageKey);
+  const hidden = loadHiddenColumns(ids.storageKey, ids.defaultHidden);
 
   const groups = new Map();
   columnsCfg.forEach((col) => {

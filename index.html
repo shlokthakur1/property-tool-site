@@ -94,19 +94,30 @@
   <section id="tab-subdivision" class="tab-panel">
     <div class="pt-shell">
       <section class="toolbar toolbar--wrap">
-        <div id="subdivision-filters" class="toolbar__filters"></div>
-        <div id="subdivision-params" class="toolbar__params"></div>
+        <div class="strategies-bar">
+          <div id="subdivision-strategies" class="strategies"></div>
+          <button id="subdivision-save-strategy" class="btn btn--secondary">Save as Strategy</button>
+        </div>
         <button id="subdivision-clear-filters" class="btn btn--ghost">Clear filters</button>
+        <button id="subdivision-column-panel-toggle" class="btn btn--secondary">Columns</button>
+        <button id="subdivision-assumptions-toggle" class="btn btn--secondary">Assumptions</button>
         <span id="subdivision-row-count" class="toolbar__count"></span>
       </section>
+      <div id="subdivision-querybuilder" class="querybuilder"></div>
       <p class="subdivision-note">
-        Suburbs with at least one currently-For-Sale block worth subdividing at a profit,
-        ranked by a profitability index (best opportunity's profit × confidence). Resale value
-        per new lot comes from actual recent vacant-land sales near the resulting lot size — not
-        a fixed assumption. Subdivision cost and stamp duty buffer are yours to set above;
-        profit and rankings update live. Click a suburb to see its listings, and click a listing
-        to see the comparables used. See <code>references/subdivision/context.md</code> for the
-        full methodology.
+        One row per suburb, ranked by a composite Opportunity Score (50% best profit, 30% number
+        of opportunities, 20% data confidence — profit and count percentile-ranked against every
+        other qualifying suburb, confidence used directly since it's already 0-1). Resale value
+        per new lot comes from actual recent vacant-land sales near the resulting lot size, not a
+        fixed assumption. Build a filter below against individual candidate listings (field /
+        condition / value per row, the left-hand toggle sets AND/OR for that group, "&gt;" nests a
+        condition into a sub-group with the row above it) and save it as a named Strategy to reuse
+        later — the same Strategies list as Suburb Finder; any condition on a field Subdivision
+        doesn't have is just skipped when loaded here. Cost assumptions (subdivision cost/lot,
+        stamp duty, selling costs, holding costs) are under "Assumptions" — change any of them and
+        profit, confidence and the Opportunity Score all recalculate instantly. Click a suburb to
+        see its listings, and click a listing to see the comparables used. See
+        <code>references/subdivision/context.md</code> for the full methodology.
       </p>
 
       <div id="subdivision-table"></div>
@@ -212,6 +223,16 @@
     </div>
   </div>
 
+  <div id="subdivision-assumptions-modal" class="modal-overlay" hidden>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Subdivision assumptions</h3>
+        <button id="subdivision-assumptions-close" class="btn btn--ghost" aria-label="Close">✕</button>
+      </div>
+      <div id="subdivision-assumptions-body" class="modal-body"></div>
+    </div>
+  </div>
+
   <div id="compare-modal" class="modal-overlay" hidden>
     <div class="modal-dialog modal-dialog--wide">
       <div class="modal-header">
@@ -259,6 +280,18 @@
       <button id="shortlist-column-panel-none" class="btn btn--ghost">Select none</button>
     </div>
     <div id="shortlist-column-panel-groups" class="column-panel__groups"></div>
+  </aside>
+
+  <aside id="subdivision-column-panel" class="column-panel" hidden>
+    <div class="column-panel__header">
+      <h3>Columns</h3>
+      <button id="subdivision-column-panel-close" class="btn btn--ghost" aria-label="Close">✕</button>
+    </div>
+    <div class="column-panel__actions">
+      <button id="subdivision-column-panel-all" class="btn btn--ghost">Select all</button>
+      <button id="subdivision-column-panel-none" class="btn btn--ghost">Select none</button>
+    </div>
+    <div id="subdivision-column-panel-groups" class="column-panel__groups"></div>
   </aside>
 
   <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>

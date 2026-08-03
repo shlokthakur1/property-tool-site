@@ -366,11 +366,6 @@ a:hover {
   display: block;
 }
 
-.toolbar__params {
-  display: flex;
-  gap: 8px;
-}
-
 .subdivision-note {
   margin: 14px 24px;
   padding: 14px 16px;
@@ -428,26 +423,45 @@ a:hover {
   font-family: var(--font-family);
 }
 
-/* Live subdivision economics inputs */
-.paramfilter {
+/* Subdivision assumptions modal */
+.assumptions-grid {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 6px 10px;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.paramfilter__input {
-  width: 90px;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+.assumptions-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assumptions-field label {
   font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.assumptions-field input {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
   font-family: var(--font-family);
+  color: var(--text);
+}
+
+.assumptions-field__help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.assumptions-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* Estimated subdivision profit */
