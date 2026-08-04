@@ -17,9 +17,6 @@
       <h1 id="site-title">Property Explorer</h1>
       <p id="site-meta" class="app-header__meta"></p>
     </div>
-    <div class="app-header__actions">
-      <button id="download-xlsx" class="btn btn--primary">Download Excel</button>
-    </div>
   </header>
 
   <nav class="tabs">
@@ -50,22 +47,17 @@
           <span id="suburbfinder-row-count" class="toolbar__count"></span>
         </section>
         <div id="suburbfinder-querybuilder" class="querybuilder"></div>
-        <p class="subdivision-note">
-          One row per suburb, computed from the full listing history (including the 2-year sold sweep) —
-          not just what's browsable in Data Table. Build a filter below (field / condition / value per row,
-          the left-hand toggle sets AND/OR for that group, "&gt;" nests a condition into a sub-group with the
-          row above it) and save it as a named Strategy to reuse later. Tick rows (checkbox column) to
-          Compare or Add to Shortlist. Price growth (1yr/2yr) compares median sold price across two
-          equal-width windows ending today; 1mo/6mo instead compare this calendar month's sold prices
-          (pooled with current For Sale asking prices, since sold-this-month alone is often too thin) against
-          the full previous 1 or 6 calendar months of sold prices — 1mo widens to 2 or 3 prior months where
-          a single month's sales are too thin, and both still blank if even that isn't enough, since it needs
-          3+ sales/listings on each side. See <code>suburb_columns</code> in
-          <code>config.yaml</code> for the full methodology, and the Data Definitions tab for what every column
-          here means.
-        </p>
+
+        <div class="table-topbar">
+          <div id="suburbfinder-pagesize-top"></div>
+          <div class="table-topbar__right">
+            <button id="suburbfinder-download-xlsx" class="btn btn--secondary">Download Excel</button>
+            <input id="suburbfinder-suburb-search" type="text" placeholder="Search suburbs..." class="toolbar__search" />
+          </div>
+        </div>
 
         <div id="suburb-table"></div>
+        <p class="subdivision-note">See the Data Definitions tab for what every column here means.</p>
       </div>
 
       <div id="subtab-shortlist" class="subtab-panel">
@@ -79,14 +71,17 @@
           <button id="shortlist-compare-toggle" class="btn btn--secondary" disabled>Compare (0)</button>
           <span id="shortlist-row-count" class="toolbar__count"></span>
         </section>
-        <p class="subdivision-note">
-          Suburbs you've explicitly added via "Add to Shortlist" in Explore suburbs — <strong>not</strong>
-          affected by any filters there. Tick rows to Compare or Remove. "Load Shortlist" swaps in a
-          previously saved named list; "Save as Shortlist" snapshots the current one under a name so you
-          can build up more than one (e.g. per strategy or state) and switch between them.
-        </p>
+
+        <div class="table-topbar">
+          <div id="shortlist-pagesize-top"></div>
+          <div class="table-topbar__right">
+            <button id="shortlist-download-xlsx" class="btn btn--secondary">Download Excel</button>
+            <input id="shortlist-suburb-search" type="text" placeholder="Search suburbs..." class="toolbar__search" />
+          </div>
+        </div>
 
         <div id="shortlist-table"></div>
+        <p class="subdivision-note">See the Data Definitions tab for what every column here means.</p>
       </div>
     </div>
   </section>
@@ -104,35 +99,36 @@
         <span id="subdivision-row-count" class="toolbar__count"></span>
       </section>
       <div id="subdivision-querybuilder" class="querybuilder"></div>
-      <p class="subdivision-note">
-        One row per suburb, ranked by a composite Opportunity Score (50% best profit, 30% number
-        of opportunities, 20% data confidence — profit and count percentile-ranked against every
-        other qualifying suburb, confidence used directly since it's already 0-1). Resale value
-        per new lot comes from actual recent vacant-land sales near the resulting lot size, not a
-        fixed assumption. Build a filter below against individual candidate listings (field /
-        condition / value per row, the left-hand toggle sets AND/OR for that group, "&gt;" nests a
-        condition into a sub-group with the row above it) and save it as a named Strategy to reuse
-        later — the same Strategies list as Suburb Finder; any condition on a field Subdivision
-        doesn't have is just skipped when loaded here. Cost assumptions (subdivision cost/lot,
-        stamp duty, selling costs, holding costs) are under "Assumptions" — change any of them and
-        profit, confidence and the Opportunity Score all recalculate instantly. Click a suburb to
-        see its listings, and click a listing to see the comparables used. See
-        <code>references/subdivision/context.md</code> for the full methodology.
-      </p>
+
+      <div class="table-topbar">
+        <div id="subdivision-pagesize-top"></div>
+        <div class="table-topbar__right">
+          <button id="subdivision-download-xlsx" class="btn btn--secondary">Download Excel</button>
+          <input id="subdivision-suburb-search" type="text" placeholder="Search suburbs..." class="toolbar__search" />
+        </div>
+      </div>
 
       <div id="subdivision-table"></div>
+      <p class="subdivision-note">See the Data Definitions tab for what every column here means.</p>
     </div>
   </section>
 
   <section id="tab-datatable" class="tab-panel">
     <div class="pt-shell">
       <section class="toolbar">
-        <input id="search-box" type="text" placeholder="Search address..." class="toolbar__search" />
         <div id="filters" class="toolbar__filters"></div>
         <button id="clear-filters" class="btn btn--ghost">Clear filters</button>
         <button id="column-panel-toggle" class="btn btn--secondary">Columns</button>
         <span id="row-count" class="toolbar__count"></span>
       </section>
+
+      <div class="table-topbar">
+        <div id="datatable-pagesize-top"></div>
+        <div class="table-topbar__right">
+          <button id="datatable-download-xlsx" class="btn btn--secondary">Download Excel</button>
+          <input id="search-box" type="text" placeholder="Search address..." class="toolbar__search" />
+        </div>
+      </div>
 
       <div id="property-table"></div>
     </div>

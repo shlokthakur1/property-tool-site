@@ -150,6 +150,40 @@ a:hover {
   flex-wrap: wrap;
 }
 
+/* Top bar directly above each table: page-size selector on the left,
+   Download Excel + search on the right. A second, independent page-size
+   control from the one Tabulator renders bottom-left of its own footer —
+   see createPageSizeSelect in app.js for how the two stay in sync. */
+.table-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  flex-wrap: wrap;
+}
+
+.table-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.table-topbar__right .toolbar__search {
+  flex: 0 1 220px;
+}
+
+.pagesize-select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-family: var(--font-family);
+  color: var(--text-muted);
+  background: var(--surface);
+  cursor: pointer;
+}
+
 .toolbar__count {
   margin-left: auto;
   font-size: 13px;
@@ -1367,11 +1401,14 @@ a:hover {
    its row's background-color, so zebra + hover coloring carries through
    automatically there; only typography and the divider color need overriding. */
 .tabulator .tabulator-cell.tabulator-frozen,
-.tabulator .tabulator-header .tabulator-frozen,
-.tabulator .tabulator-cell.pt-identity,
-.tabulator .tabulator-header .tabulator-col.pt-identity {
+.tabulator .tabulator-cell.pt-identity {
   font-weight: 600;
   white-space: nowrap;
+}
+
+.tabulator .tabulator-header .tabulator-frozen,
+.tabulator .tabulator-header .tabulator-col.pt-identity {
+  font-weight: 600;
 }
 
 .tabulator-row .tabulator-cell.tabulator-frozen.tabulator-frozen-left {

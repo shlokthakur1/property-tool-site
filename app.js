@@ -36,6 +36,68 @@ function debounce(fn, delay) {
   };
 }
 
+function formatArea(suburb, state, postcode) {
+  const label = [suburb, state].filter(Boolean).join(", ");
+  return postcode ? `${label} ${postcode}` : label;
+}
+
+// Collapses suburb/state/postcode into a single "Area" column wherever a
+// table's own columnsCfg has all three — same underlying data, just fewer
+// columns to scan (per user request). Only affects the visible table +
+// column panel + Compare; Data Definitions still documents suburb/state/
+// postcode individually since they're genuinely separate fields, and
+// query-builder filtering still targets them individually too (filtering
+// "State = NSW" is more precise than a substring match on a combined
+// "Area" string) — so callers pass the ORIGINAL columnsCfg to
+// buildFieldCatalog-style functions and only the merged one to the table/
+// panel/compare builders.
+function mergeIdentityColumns(columnsCfg) {
+  const identityFields = new Set(["suburb", "state", "postcode"]);
+  const suburbIndex = columnsCfg.findIndex((c) => c.field === "suburb");
+  if (suburbIndex === -1) return columnsCfg;
+  const areaCol = {
+    field: "area",
+    title: "Area",
+    group: columnsCfg[suburbIndex].group,
+    description: "Suburb, state and postcode combined into one column.",
+  };
+  const merged = [];
+  let inserted = false;
+  columnsCfg.forEach((col) => {
+    if (identityFields.has(col.field)) {
+      if (!inserted) {
+        merged.push(areaCol);
+        inserted = true;
+      }
+      return;
+    }
+    merged.push(col);
+  });
+  return merged;
+}
+
+// Page-size control — Tabulator's own built-in one already sits bottom-left
+// of the table's footer (paginationSizeSelector); this builds a second,
+// independent one for the top of the table, kept in sync in both
+// directions via Tabulator's pageSizeChanged event.
+const PAGE_SIZES = [25, 50, 100, 250, 500];
+function createPageSizeSelect(table, initial) {
+  const select = document.createElement("select");
+  select.className = "pagesize-select";
+  PAGE_SIZES.forEach((size) => {
+    const opt = document.createElement("option");
+    opt.value = String(size);
+    opt.textContent = `${size} / page`;
+    if (size === initial) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.addEventListener("change", () => table.setPageSize(Number(select.value)));
+  table.on("pageSizeChanged", (size) => {
+    select.value = String(size);
+  });
+  return select;
+}
+
 function buildColumnDef(col) {
     const base = { field: col.field, title: col.title, headerFilter: false };
     if (col.field === "url") {
@@ -55,6 +117,7 @@ function buildColumnDef(col) {
       // emphasis (bold, no-wrap) without pinning.
       return { ...base, cssClass: "pt-identity" };
     }
+    if (col.field === "area") return { ...base, cssClass: "pt-identity", minWidth: 160 };
     if (
       col.field === "land_size_m2" ||
       col.field === "suburb_comparable_count" ||
@@ -536,6 +599,8 @@ function buildSuburbGroups(listings, params, qb) {
     groups.push({
       suburb: best.suburb,
       state: best.state,
+      postcode: best.postcode,
+      area: formatArea(best.suburb, best.state, best.postcode),
       opportunityCount: items.length,
       bestProfit: best.profit,
       bestConfidence: best.confidence,
@@ -582,8 +647,7 @@ function formatMoney(value) {
 // sorted by) — everything else is available via the Columns panel.
 // ─────────────────────────────────────────────────────────────────────────────
 const SUBDIVISION_COLUMNS = [
-  { field: "suburb", title: "Suburb", group: "Identity", description: "Suburb name." },
-  { field: "state", title: "State", group: "Identity", description: "Australian state/territory." },
+  { field: "area", title: "Area", group: "Identity", description: "Suburb, state and postcode combined into one column." },
   { field: "opportunityScore", title: "Opportunity Score", group: "Opportunity",
     description: "Our own 0-100 composite ranking — 50% best est. profit, 30% number of opportunities, 20% data confidence. Profit and opportunity count are percentile-ranked against every other suburb with at least one profitable candidate under the current assumptions; confidence is already a 0-1 fraction so it's used directly. This is the table's default sort key.",
     formula: "round(100 * (0.5 * pctrank(bestProfit) + 0.3 * pctrank(opportunityCount) + 0.2 * bestConfidence))" },
@@ -608,16 +672,15 @@ const SUBDIVISION_COLUMNS = [
 ];
 
 const SUBDIVISION_DEFAULT_VISIBLE = new Set([
-  "suburb", "state", "opportunityScore", "opportunityCount", "bestProfit",
+  "area", "opportunityScore", "opportunityCount", "bestProfit",
   "medianLandPriceForSale", "typicalLandSizeM2", "bestConfidence",
 ]);
 
 function buildSubdivisionColumnDef(col) {
   const base = { field: col.field, title: col.title, headerFilter: false };
-  if (col.field === "suburb") return { ...base, cssClass: "pt-identity" };
-  if (col.field === "state") return { ...base, width: 80 };
+  if (col.field === "area") return { ...base, cssClass: "pt-identity", minWidth: 160 };
   if (col.field === "opportunityScore") {
-    return { ...base, sorter: "number", hozAlign: "right", width: 70, formatter: (cell) => {
+    return { ...base, sorter: "number", hozAlign: "right", width: 110, formatter: (cell) => {
       const v = cell.getValue();
       if (v == null) return "";
       return `<span class="pt-score ${scoreColorClass(v)}">${Math.round(v)}</span>`;
@@ -636,7 +699,7 @@ function buildSubdivisionColumnDef(col) {
     } };
   }
   if (col.field === "bestConfidence") {
-    return { ...base, sorter: "number", width: 110, formatter: (cell) => {
+    return { ...base, sorter: "number", width: 130, formatter: (cell) => {
       const v = cell.getValue();
       if (v == null) return "";
       const label = confidenceLabel(v);
@@ -918,13 +981,28 @@ function buildSubdivisionTab(payload) {
     data: buildSuburbGroups(listings, subdivisionParams, qb),
     columns: buildGroupedSubdivisionColumns(SUBDIVISION_COLUMNS),
     layout: "fitDataFill",
-    height: "calc(100vh - 360px)",
+    columnDefaults: { headerWordWrap: true, minWidth: 110 },
+    height: "calc(100vh - 400px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
     paginationSizeSelector: [25, 50, 100, 250, 500],
     initialSort: [{ column: "opportunityScore", dir: "desc" }],
     placeholder: "No profitable subdivision opportunities match these filters",
+  });
+
+  document.getElementById("subdivision-pagesize-top").appendChild(createPageSizeSelect(table, 50));
+
+  let suburbSearchTerm = "";
+  table.setFilter((row) => !suburbSearchTerm || String(row.suburb ?? "").toLowerCase().includes(suburbSearchTerm));
+  const suburbSearch = document.getElementById("subdivision-suburb-search");
+  suburbSearch.addEventListener("input", debounce(() => {
+    suburbSearchTerm = suburbSearch.value.trim().toLowerCase();
+    table.setFilter((row) => !suburbSearchTerm || String(row.suburb ?? "").toLowerCase().includes(suburbSearchTerm));
+  }, 200));
+
+  document.getElementById("subdivision-download-xlsx").addEventListener("click", () => {
+    table.download("xlsx", "subdivision-opportunities.xlsx", { sheetName: "Subdivision" });
   });
 
   table.on("tableBuilt", () => {
@@ -1605,7 +1683,7 @@ function buildSuburbColumnDef(col) {
     // table's columns are grouped (buildGroupedSuburbColumns), so true pinning
     // isn't available here; cssClass alone gives it the identity-column
     // emphasis (bold, no-wrap) without pinning.
-    if (col.field === "suburb") return { ...base, cssClass: "pt-identity" };
+    if (col.field === "area") return { ...base, cssClass: "pt-identity", minWidth: 160 };
     if (SUBURB_MONEY_FIELDS.has(col.field)) {
       return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
         const v = cell.getValue();
@@ -1677,13 +1755,12 @@ function buildSuburbColumnDef(col) {
       } };
     }
     if (SUBURB_SCORE_FIELDS.has(col.field)) {
-      return { ...base, sorter: "number", hozAlign: "right", width: 70, formatter: (cell) => {
+      return { ...base, sorter: "number", hozAlign: "right", width: 110, formatter: (cell) => {
         const v = cell.getValue();
         if (v == null) return "";
         return `<span class="pt-score ${scoreColorClass(v)}">${Math.round(v)}</span>`;
       } };
     }
-    if (col.field === "state") return { ...base, width: 80 };
     return { ...base, sorter: "number" };
 }
 
@@ -1842,7 +1919,7 @@ function wireCompareFeature(table, columnsCfg, toggleBtnId) {
 function buildSelectionColumn() {
   return {
     formatter: "rowSelection", titleFormatter: "rowSelection",
-    hozAlign: "center", headerSort: false, width: 40,
+    hozAlign: "center", headerSort: false, width: 40, minWidth: 40, headerWordWrap: false,
   };
 }
 
@@ -2042,12 +2119,21 @@ function buildSuburbFinderTab(payload) {
   wireCompareModalClose();
   const activeShortlist = loadActiveShortlist();
 
+  // Suburb/state/postcode collapse into one "Area" column for display —
+  // the query builder's field catalog still targets the original,
+  // unmerged suburbs.columns so filtering stays granular per-field.
+  suburbs.rows.forEach((row) => {
+    row.area = formatArea(row.suburb, row.state, row.postcode);
+  });
+  const suburbColumnsCfg = mergeIdentityColumns(suburbs.columns);
+
   // ── Explore suburbs ─────────────────────────────────────────────────────
   const exploreTable = new Tabulator("#suburb-table", {
     data: suburbs.rows,
-    columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
+    columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbColumnsCfg)],
     layout: "fitDataFill",
-    height: "calc(100vh - 400px)",
+    columnDefaults: { headerWordWrap: true, minWidth: 110 },
+    height: "calc(100vh - 440px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
@@ -2057,24 +2143,38 @@ function buildSuburbFinderTab(payload) {
     selectableRows: MAX_COMPARE_SUBURBS,
   });
 
+  document.getElementById("suburbfinder-pagesize-top").appendChild(createPageSizeSelect(exploreTable, 50));
+
   const fieldCatalog = buildSuburbFieldCatalog(suburbs.columns, suburbs.rows);
+  let exploreSearchTerm = "";
+  const exploreFilter = (row) => qb.matches(row) &&
+    (!exploreSearchTerm || String(row.suburb ?? "").toLowerCase().includes(exploreSearchTerm));
   const qb = createQueryBuilder(document.getElementById("suburbfinder-querybuilder"), fieldCatalog, {
     persistKey: "suburbfinder",
-    onFilterChange: () => exploreTable.setFilter((row) => qb.matches(row)),
+    onFilterChange: () => exploreTable.setFilter(exploreFilter),
   });
   // Apply whatever was restored from localStorage (or the still-empty
   // default) once up front — createQueryBuilder can't safely call
   // onFilterChange during its own construction (this closure captures `qb`,
   // which isn't assigned yet while `createQueryBuilder(...)` is still running).
-  exploreTable.setFilter((row) => qb.matches(row));
+  exploreTable.setFilter(exploreFilter);
+
+  const exploreSearchBox = document.getElementById("suburbfinder-suburb-search");
+  exploreSearchBox.addEventListener("input", debounce(() => {
+    exploreSearchTerm = exploreSearchBox.value.trim().toLowerCase();
+    exploreTable.setFilter(exploreFilter);
+  }, 200));
+  document.getElementById("suburbfinder-download-xlsx").addEventListener("click", () => {
+    exploreTable.download("xlsx", "suburb-finder.xlsx", { sheetName: "Suburbs" });
+  });
 
   createStrategiesPanel(document.getElementById("suburbfinder-strategies"), qb);
   wireSaveStrategyButton(document.getElementById("suburbfinder-save-strategy"), qb);
   document.getElementById("suburbfinder-clear-filters").addEventListener("click", () => qb.clear());
-  wireCompareFeature(exploreTable, suburbs.columns, "suburbfinder-compare-toggle");
+  wireCompareFeature(exploreTable, suburbColumnsCfg, "suburbfinder-compare-toggle");
 
   exploreTable.on("tableBuilt", () => {
-    createColumnPanel(exploreTable, suburbs.columns, {
+    createColumnPanel(exploreTable, suburbColumnsCfg, {
       panel: "suburbfinder-column-panel", groups: "suburbfinder-column-panel-groups",
       toggle: "suburbfinder-column-panel-toggle", close: "suburbfinder-column-panel-close",
       selectAll: "suburbfinder-column-panel-all", selectNone: "suburbfinder-column-panel-none",
@@ -2091,15 +2191,30 @@ function buildSuburbFinderTab(payload) {
 
   const shortlistTable = new Tabulator("#shortlist-table", {
     data: shortlistRows(),
-    columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbs.columns)],
+    columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbColumnsCfg)],
     layout: "fitDataFill",
-    height: "calc(100vh - 400px)",
+    columnDefaults: { headerWordWrap: true, minWidth: 110 },
+    height: "calc(100vh - 440px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
     paginationSizeSelector: [25, 50, 100, 250, 500],
     placeholder: "Nothing in this shortlist yet — tick suburbs in Explore suburbs and click \"Add to Shortlist\".",
     selectableRows: MAX_COMPARE_SUBURBS,
+  });
+
+  document.getElementById("shortlist-pagesize-top").appendChild(createPageSizeSelect(shortlistTable, 50));
+
+  let shortlistSearchTerm = "";
+  const shortlistFilter = (row) =>
+    !shortlistSearchTerm || String(row.suburb ?? "").toLowerCase().includes(shortlistSearchTerm);
+  const shortlistSearchBox = document.getElementById("shortlist-suburb-search");
+  shortlistSearchBox.addEventListener("input", debounce(() => {
+    shortlistSearchTerm = shortlistSearchBox.value.trim().toLowerCase();
+    shortlistTable.setFilter(shortlistFilter);
+  }, 200));
+  document.getElementById("shortlist-download-xlsx").addEventListener("click", () => {
+    shortlistTable.download("xlsx", "shortlist.xlsx", { sheetName: "Shortlist" });
   });
 
   function refreshShortlistTable() {
@@ -2132,10 +2247,10 @@ function buildSuburbFinderTab(payload) {
     refreshShortlistTable();
   });
   wireSaveShortlistButton(document.getElementById("shortlist-save"), () => activeShortlist);
-  wireCompareFeature(shortlistTable, suburbs.columns, "shortlist-compare-toggle");
+  wireCompareFeature(shortlistTable, suburbColumnsCfg, "shortlist-compare-toggle");
 
   shortlistTable.on("tableBuilt", () => {
-    createColumnPanel(shortlistTable, suburbs.columns, {
+    createColumnPanel(shortlistTable, suburbColumnsCfg, {
       panel: "shortlist-column-panel", groups: "shortlist-column-panel-groups",
       toggle: "shortlist-column-panel-toggle", close: "shortlist-column-panel-close",
       selectAll: "shortlist-column-panel-all", selectNone: "shortlist-column-panel-none",
@@ -2564,11 +2679,17 @@ async function main() {
   document.getElementById("site-meta").textContent =
     `${payload.rows.length.toLocaleString()} properties · ${generatedText}`;
 
+  payload.rows.forEach((row) => {
+    row.area = formatArea(row.suburb, row.state, row.postcode);
+  });
+  const dataTableColumnsCfg = mergeIdentityColumns(payload.columns);
+
   const table = new Tabulator("#property-table", {
     data: payload.rows,
-    columns: buildGroupedColumns(payload.columns),
+    columns: buildGroupedColumns(dataTableColumnsCfg),
     layout: "fitDataFill",
-    height: "calc(100vh - 260px)",
+    columnDefaults: { headerWordWrap: true, minWidth: 110 },
+    height: "calc(100vh - 300px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
@@ -2576,9 +2697,11 @@ async function main() {
     placeholder: "No matching properties",
   });
 
+  document.getElementById("datatable-pagesize-top").appendChild(createPageSizeSelect(table, 50));
+
   table.on("tableBuilt", () => {
     buildFilterControls(payload.rows, table);
-    createColumnPanel(table, payload.columns, {
+    createColumnPanel(table, dataTableColumnsCfg, {
       panel: "column-panel", groups: "column-panel-groups", toggle: "column-panel-toggle",
       close: "column-panel-close", selectAll: "column-panel-all", selectNone: "column-panel-none",
       storageKey: "datatable-hidden-columns",
@@ -2596,7 +2719,7 @@ async function main() {
     }, 200)
   );
 
-  document.getElementById("download-xlsx").addEventListener("click", () => {
+  document.getElementById("datatable-download-xlsx").addEventListener("click", () => {
     table.download("xlsx", "properties.xlsx", { sheetName: "Properties" });
   });
 
