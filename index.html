@@ -201,11 +201,20 @@
 
   <section id="tab-definitions" class="tab-panel">
     <div class="pt-shell">
+      <div class="table-topbar">
+        <div id="definitions-pagesize-top"></div>
+        <div class="table-topbar__right">
+          <span id="definitions-row-count" class="toolbar__count"></span>
+          <button id="definitions-download-xlsx" class="btn btn--secondary">Download Excel</button>
+          <input id="definitions-search" type="text" placeholder="Search definitions..." class="toolbar__search" />
+        </div>
+      </div>
+
+      <div id="definitions-table"></div>
       <p class="subdivision-note">
-        Every column in the Data Table tab, what it means, and how it's calculated (where it's
-        a calculated value rather than a raw field from the listing).
+        Every column across Suburb Finder, Subdivision and Data Table — what it means and how
+        it's calculated, where it's a calculated value rather than a raw field from the listing.
       </p>
-      <div id="definitions-list"></div>
     </div>
   </section>
 

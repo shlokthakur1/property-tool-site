@@ -1654,7 +1654,8 @@ const SUBURB_PERCENT_SIGNED_FIELDS = new Set([
   "gross_rental_yield_pct_house", "gross_rental_yield_pct_unit",
 ]);
 const SUBURB_INT_FIELDS = new Set([
-  "listing_count", "for_sale_count", "sold_recent_count", "subdivision_candidate_count",
+  "for_sale_count", "sold_recent_count", "subdivision_candidate_count",
+  "listings_current", "listings_1mo", "listings_6mo", "listings_1yr",
   "population_2025", "new_dwelling_approvals_fy", "median_min_lot_size_m2",
   "median_land_size_m2_house", "median_land_size_m2_unit",
   "rentals_count_house", "rentals_count_unit", "sold_recent_count_house", "sold_recent_count_unit",
@@ -2272,30 +2273,68 @@ function buildSuburbFinderTab(payload) {
 // build_site.py select_rows / build_suburb_stats) so this never drifts out of
 // sync with what those tabs actually show.
 // ─────────────────────────────────────────────────────────────────────────────
-function renderDefinitionsTable(columns) {
-  const rows = columns.map((col) => `
-    <tr>
-      <td>${col.title}</td>
-      <td>${col.description ?? "—"}</td>
-      <td>${col.formula ? `<code>${col.formula}</code>` : "—"}</td>
-    </tr>
-  `).join("");
-  return `
-    <table class="comps-table">
-      <thead><tr><th>Column</th><th>Description</th><th>Formula</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
+// One combined, searchable table instead of a separate static list per tab
+// — the same field name can mean different things in different tabs (e.g.
+// "Zone" is a single property's own zone in Data Table, the suburb's
+// predominant zone in Suburb Finder), so each row keeps its source tab as
+// its own column rather than collapsing them together.
+function buildDefinitionsRows(payload) {
+  const rows = [];
+  payload.columns.forEach((c) => rows.push({ source: "Data Table", title: c.title, description: c.description, formula: c.formula }));
+  if (payload.suburbs) {
+    payload.suburbs.columns.forEach((c) => rows.push({ source: "Suburb Finder", title: c.title, description: c.description, formula: c.formula }));
+  }
+  SUBDIVISION_COLUMNS.forEach((c) => rows.push({ source: "Subdivision", title: c.title, description: c.description, formula: c.formula }));
+  return rows;
 }
 
 function buildDefinitionsTab(payload) {
-  const container = document.getElementById("definitions-list");
-  let html = `<h3 class="definitions-heading">Data Table</h3>${renderDefinitionsTable(payload.columns)}`;
-  if (payload.suburbs) {
-    html += `<h3 class="definitions-heading">Suburb Finder</h3>${renderDefinitionsTable(payload.suburbs.columns)}`;
+  const rows = buildDefinitionsRows(payload);
+
+  const table = new Tabulator("#definitions-table", {
+    data: rows,
+    layout: "fitDataFill",
+    columnDefaults: { headerWordWrap: true },
+    height: "calc(100vh - 320px)",
+    pagination: true,
+    paginationMode: "local",
+    paginationSize: 50,
+    paginationSizeSelector: [25, 50, 100, 250, 500],
+    placeholder: "No matching definitions",
+    columns: [
+      { field: "source", title: "Tab", width: 140, headerFilter: false },
+      { field: "title", title: "Column", minWidth: 200, headerFilter: false, cssClass: "pt-identity" },
+      { field: "description", title: "Description", minWidth: 380, headerFilter: false,
+        formatter: (cell) => cell.getValue() ?? "—" },
+      { field: "formula", title: "Formula", minWidth: 260, headerFilter: false,
+        formatter: (cell) => {
+          const v = cell.getValue();
+          return v ? `<code>${v}</code>` : "—";
+        } },
+    ],
+  });
+
+  document.getElementById("definitions-pagesize-top").appendChild(createPageSizeSelect(table, 50));
+
+  let searchTerm = "";
+  function matchesSearch(row) {
+    if (!searchTerm) return true;
+    const haystack = `${row.source} ${row.title} ${row.description ?? ""} ${row.formula ?? ""}`.toLowerCase();
+    return haystack.includes(searchTerm);
   }
-  html += `<h3 class="definitions-heading">Subdivision</h3>${renderDefinitionsTable(SUBDIVISION_COLUMNS)}`;
-  container.innerHTML = html;
+  table.setFilter(matchesSearch);
+  const searchBox = document.getElementById("definitions-search");
+  searchBox.addEventListener("input", debounce(() => {
+    searchTerm = searchBox.value.trim().toLowerCase();
+    table.setFilter(matchesSearch);
+  }, 200));
+
+  document.getElementById("definitions-download-xlsx").addEventListener("click", () => {
+    table.download("xlsx", "data-definitions.xlsx", { sheetName: "Definitions" });
+  });
+
+  table.on("dataFiltered", () => updateRowCount(table, "definitions-row-count", "definitions"));
+  table.on("renderComplete", () => updateRowCount(table, "definitions-row-count", "definitions"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

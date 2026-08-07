@@ -297,10 +297,26 @@ a:hover {
   margin: 8px 0 0;
 }
 
-#definitions-list {
+#definitions-table {
   margin: 8px 0 0;
   background: var(--surface);
   overflow: hidden;
+}
+
+/* Data Definitions — descriptions/formulas are long-form reference text,
+   so unlike every other table here, body cells wrap instead of truncating
+   (Tabulator auto-grows row height when a cell's content wraps). */
+#definitions-table .tabulator-cell {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+#definitions-table .tabulator-cell code {
+  background: rgba(108, 92, 224, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 /* vs suburb median: above median (pricier) vs below median (cheaper) */
@@ -418,22 +434,6 @@ a:hover {
   border-radius: 4px;
 }
 
-/* Data Definitions — one table per tab documented */
-#definitions-list .comps-table {
-  font-size: 13px;
-}
-
-#definitions-list .comps-table th {
-  background: var(--group-band);
-  color: var(--group-band-text);
-}
-
-#definitions-list .comps-table code {
-  background: rgba(108, 92, 224, 0.08);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 12px;
-}
 
 /* Range (min/max) filter */
 .rangefilter {
@@ -857,17 +857,6 @@ a:hover {
 
 .column-panel__item input {
   margin: 0;
-}
-
-/* Data Definitions — one table per tab documented */
-.definitions-heading {
-  margin: 20px 24px 4px;
-  font-size: 15px;
-  color: var(--text);
-}
-
-.definitions-heading:first-child {
-  margin-top: 4px;
 }
 
 /* Strategies bar (Suburb Finder toolbar) */
