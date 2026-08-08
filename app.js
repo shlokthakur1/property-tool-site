@@ -606,10 +606,27 @@ function buildSuburbGroups(listings, params, qb) {
       bestConfidence: best.confidence,
       medianLandPriceForSale: median(items.map((i) => i.price).filter((v) => v != null)),
       typicalLandSizeM2: median(items.map((i) => i.land_size_m2).filter((v) => v != null)),
+      // Min Lot Size / Typical Lot Size — the two inputs behind every
+      // candidate's own lots_possible calc (see calc_min_lot_m2 in
+      // build_site.py), surfaced as their own sense-check columns rather
+      // than staying invisible: min_lot_m2 is whichever of the two actually
+      // applied for that listing (typical, else zoning, else the flat
+      // fallback), typical_lot_m2 is always this suburb's own ordinary
+      // House lot size specifically. Both should be near-constant across a
+      // suburb's own candidates, so median just guards against edge-case
+      // drift rather than doing real aggregation work.
+      minLotSizeM2: median(items.map((i) => i.min_lot_m2).filter((v) => v != null)),
+      typicalLotSizeM2: median(items.map((i) => i.typical_lot_m2).filter((v) => v != null)),
       bestLotsPossible: best.lots_possible,
       bestResultingLotM2: best.resulting_lot_m2,
       bestCompCount: best.comp_count,
       bestZone: best.zone,
+      // Other council rules — NSW-only for now (see build_site.py), shown
+      // for the single best opportunity's own block, same convention as
+      // bestZone above.
+      bestHeightLimit: best.height_limit_m,
+      bestFloorSpaceRatio: best.floor_space_ratio,
+      bestHeritageSignificance: best.heritage_significance,
       listings: items,
     });
   }
@@ -669,6 +686,16 @@ const SUBDIVISION_COLUMNS = [
     description: "Number of comparable sold vacant-land listings behind the best opportunity's resale estimate." },
   { field: "bestZone", title: "Best Opportunity — Zone", group: "Best Opportunity Detail",
     description: "Planning zone of the best opportunity's block, where known." },
+  { field: "bestHeightLimit", title: "Best Opportunity — Height Limit (m)", group: "Best Opportunity Detail",
+    description: "Maximum building height permitted on the best opportunity's block, in metres — NSW only for now (no equivalent published layer for other states, see config.yaml's zoning: block)." },
+  { field: "bestFloorSpaceRatio", title: "Best Opportunity — Floor Space Ratio", group: "Best Opportunity Detail",
+    description: "Maximum floor space ratio permitted on the best opportunity's block — NSW only for now." },
+  { field: "bestHeritageSignificance", title: "Best Opportunity — Heritage Listing", group: "Best Opportunity Detail",
+    description: "Heritage significance (Local/State/National/World), where the best opportunity's block is heritage-listed — NSW only for now. Blank means not listed, not \"unknown\"." },
+  { field: "minLotSizeM2", title: "Min Lot Size (Zoning)", group: "Zoning & Council Rules",
+    description: "The effective minimum lot size actually used to work out how many new lots each of this suburb's candidates can be split into — whichever of Typical Lot Size (Suburb) or the zone's own published minimum applied (see build_site.py's calc_min_lot_m2), falling back further to subdivision.min_lot_size_fallback_m2 in config.yaml where neither is available. Median across this suburb's own candidates, which should normally already agree with each other almost exactly." },
+  { field: "typicalLotSizeM2", title: "Typical Lot Size (Suburb)", group: "Zoning & Council Rules",
+    description: "This suburb's own ordinary/typical House lot size (median, at least subdivision.min_comparables House listings required) — the realistic \"what does a normal lot look like here\" benchmark preferred over the zone's bare legal minimum when working out lots_possible, since dividing by the legal floor alone assumes every new lot gets created at that minimum. Distinct from Median Land Size (For Sale), which is the size of the (unusually large, by definition) subdivision-candidate blocks themselves, not ordinary lots generally." },
 ];
 
 const SUBDIVISION_DEFAULT_VISIBLE = new Set([
@@ -709,10 +736,23 @@ function buildSubdivisionColumnDef(col) {
   if (col.field === "medianLandPriceForSale") {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => formatMoney(cell.getValue()) };
   }
-  if (col.field === "typicalLandSizeM2" || col.field === "bestResultingLotM2") {
+  if (col.field === "typicalLandSizeM2" || col.field === "bestResultingLotM2"
+      || col.field === "minLotSizeM2" || col.field === "typicalLotSizeM2") {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
       const v = cell.getValue();
       return v == null ? "" : `${Math.round(v).toLocaleString()} m²`;
+    } };
+  }
+  if (col.field === "bestHeightLimit") {
+    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+      const v = cell.getValue();
+      return v == null ? "" : `${v} m`;
+    } };
+  }
+  if (col.field === "bestFloorSpaceRatio") {
+    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
+      const v = cell.getValue();
+      return v == null ? "" : `${v}:1`;
     } };
   }
   return { ...base, sorter: "string" };
@@ -1640,6 +1680,8 @@ const SUBURB_CATEGORICAL_FIELDS = new Set([
 const SUBURB_MONEY_FIELDS = new Set([
   "non_res_building_approvals_value_fy", "infrastructure_spend_per_capita",
   "median_price_house", "median_price_unit",
+  "price_p25_house", "price_p75_house", "price_iqr_house",
+  "price_p25_unit", "price_p75_unit", "price_iqr_unit",
 ]);
 const SUBURB_MONEY_PER_M2_FIELDS = new Set(["median_price_per_m2_house", "median_price_per_m2_unit"]);
 const SUBURB_MONEY_PER_WEEK_FIELDS = new Set(["median_rent_weekly_house", "median_rent_weekly_unit"]);
@@ -1654,11 +1696,11 @@ const SUBURB_PERCENT_SIGNED_FIELDS = new Set([
   "gross_rental_yield_pct_house", "gross_rental_yield_pct_unit",
 ]);
 const SUBURB_INT_FIELDS = new Set([
-  "for_sale_count", "sold_recent_count", "subdivision_candidate_count",
+  "for_sale_count", "sold_recent_count",
   "listings_current", "listings_1mo", "listings_6mo", "listings_1yr",
-  "population_2025", "new_dwelling_approvals_fy", "median_min_lot_size_m2",
+  "rentals_current", "rentals_1mo", "rentals_6mo",
+  "population_2025", "new_dwelling_approvals_fy",
   "median_land_size_m2_house", "median_land_size_m2_unit",
-  "rentals_count_house", "rentals_count_unit", "sold_recent_count_house", "sold_recent_count_unit",
   "volatility_index_house", "volatility_index_unit",
 ]);
 
