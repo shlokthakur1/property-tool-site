@@ -699,19 +699,25 @@ a:hover {
   min-width: 0;
 }
 
-.listing-card__main a {
+.listing-card__address {
   font-weight: 600;
   color: var(--text);
-  text-decoration: none;
-}
-
-.listing-card__main a:hover {
-  text-decoration: underline;
 }
 
 .listing-card__meta {
   font-size: 12.5px;
   color: var(--text-faint);
+}
+
+.listing-card__view-link {
+  font-size: 12.5px;
+  color: var(--primary);
+  text-decoration: none;
+  width: fit-content;
+}
+
+.listing-card__view-link:hover {
+  text-decoration: underline;
 }
 
 .listing-card__profit {
@@ -730,15 +736,48 @@ a:hover {
   display: none;
 }
 
-.listing-detail__calc {
+.listing-detail__calc,
+.listing-detail__zoning {
   font-size: 13px;
   margin: 12px 0;
 }
 
-.listing-detail__calc > div {
+.listing-detail__calc > div,
+.listing-detail__zoning > div {
   display: flex;
   justify-content: space-between;
   padding: 3px 0;
+}
+
+.listing-detail__zoning > div > span:first-child {
+  color: var(--text-faint);
+}
+
+.listing-detail__ai-summary {
+  font-size: 13px;
+  margin: 8px 0 4px;
+  padding: 10px 14px;
+  background: #f8f7fd;
+  border: 1px solid #ece9f5;
+  border-radius: var(--radius-md);
+  list-style: none;
+}
+
+.listing-detail__ai-summary li {
+  position: relative;
+  padding-left: 14px;
+  margin: 4px 0;
+}
+
+.listing-detail__ai-summary li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary);
 }
 
 .listing-detail__total {
@@ -1402,6 +1441,17 @@ a:hover {
 
 .tabulator-row .tabulator-cell.tabulator-frozen.tabulator-frozen-left {
   border-right: 1px solid var(--hairline-body);
+}
+
+/* Data Table's "AI Subdivision Notes" column — no per-row detail view in
+   this table (unlike the Subdivision tab's listing cards), so the full
+   3-point text lives in a native title tooltip; the cell itself is
+   single-line and truncated so it doesn't blow out row height. */
+.ai-summary-cell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tabulator .tabulator-header .tabulator-frozen.tabulator-frozen-left {

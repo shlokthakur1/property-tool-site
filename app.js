@@ -265,6 +265,22 @@ function buildColumnDef(col) {
         },
       };
     }
+    if (col.field === "ai_summary") {
+      return {
+        ...base,
+        minWidth: 260,
+        formatter: (cell) => {
+          const points = cell.getValue();
+          if (!points || !points.length) return "";
+          const joined = points.join(" • ");
+          // Full text via the native title tooltip — this table has no
+          // per-row detail view (unlike the Subdivision tab's listing
+          // cards), so a truncated cell + hover is the simplest way to
+          // surface up to 3 points without a new UI component.
+          return `<span class="ai-summary-cell" title="${escapeHtml(joined)}">${escapeHtml(joined)}</span>`;
+        },
+      };
+    }
     return base;
 }
 
@@ -606,17 +622,22 @@ function buildSuburbGroups(listings, params, qb) {
       bestConfidence: best.confidence,
       medianLandPriceForSale: median(items.map((i) => i.price).filter((v) => v != null)),
       typicalLandSizeM2: median(items.map((i) => i.land_size_m2).filter((v) => v != null)),
-      // Min Lot Size / Typical Lot Size — the two inputs behind every
-      // candidate's own lots_possible calc (see calc_min_lot_m2 in
-      // build_site.py), surfaced as their own sense-check columns rather
-      // than staying invisible: min_lot_m2 is whichever of the two actually
-      // applied for that listing (typical, else zoning, else the flat
-      // fallback), typical_lot_m2 is always this suburb's own ordinary
-      // House lot size specifically. Both should be near-constant across a
-      // suburb's own candidates, so median just guards against edge-case
-      // drift rather than doing real aggregation work.
-      minLotSizeM2: median(items.map((i) => i.min_lot_m2).filter((v) => v != null)),
-      typicalLotSizeM2: median(items.map((i) => i.typical_lot_m2).filter((v) => v != null)),
+      // Min Lot Size / Typical Lot Size — the two inputs behind the best
+      // opportunity's own lots_possible calc (see calc_min_lot_m2 in
+      // build_site.py): min_lot_m2 is whichever of the two actually applied
+      // (typical, else zoning, else the flat fallback), typical_lot_m2 is
+      // this suburb's own ordinary House lot size WITHIN THE SAME ZONE as
+      // the best opportunity (build_site.py's typical_house_lot_size_by_suburb
+      // groups by zone specifically, not just suburb — a suburb spanning
+      // several zones can have very different typical lot sizes zone to
+      // zone). Deliberately the BEST opportunity's own figures, not a
+      // median across every candidate in the suburb — this suburb's other
+      // candidates can easily sit in a different zone with a genuinely
+      // different typical/min lot size, and blending them together would
+      // be exactly the kind of misleading average this pipeline avoids
+      // elsewhere (2026-08, user-requested: this should read per zone).
+      bestMinLotSizeM2: best.min_lot_m2,
+      bestTypicalLotSizeM2: best.typical_lot_m2,
       bestLotsPossible: best.lots_possible,
       bestResultingLotM2: best.resulting_lot_m2,
       bestCompCount: best.comp_count,
@@ -654,6 +675,17 @@ function formatMoney(value) {
   return value == null ? "—" : `$${Math.round(value).toLocaleString()}`;
 }
 
+// Used only for the AI subdivision summary points — free-form generated text
+// (unlike the rest of this file's fields, which are short structured values
+// from realtyapi/zoning APIs) that could plausibly contain a stray `<` or
+// `&` from the source listing copy it was paraphrasing.
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Subdivision table columns — grouped and toggleable like Suburb Finder's
 // (see buildGroupedSuburbColumns/createColumnPanel), driven by this same
@@ -686,21 +718,21 @@ const SUBDIVISION_COLUMNS = [
     description: "Number of comparable sold vacant-land listings behind the best opportunity's resale estimate." },
   { field: "bestZone", title: "Best Opportunity — Zone", group: "Best Opportunity Detail",
     description: "Planning zone of the best opportunity's block, where known." },
+  { field: "bestMinLotSizeM2", title: "Best Opportunity — Min Lot Size (Zoning)", group: "Best Opportunity Detail",
+    description: "The effective minimum lot size used to work out how many new lots the best opportunity's own block can be split into — whichever of Typical Lot Size (Zone) or that zone's own published minimum applied (see build_site.py's calc_min_lot_m2), falling back further to subdivision.min_lot_size_fallback_m2 in config.yaml where neither is available (never for VIC zone types with no lot-size concept in law at all — see VIC_NO_LOT_SIZE_ZONE_TYPES). Specific to the best opportunity's own zone, not a suburb-wide figure — a suburb spanning several zones can have a genuinely different minimum zone to zone." },
+  { field: "bestTypicalLotSizeM2", title: "Best Opportunity — Typical Lot Size (Zone)", group: "Best Opportunity Detail",
+    description: "The ordinary/typical House lot size (median, at least subdivision.min_comparables House listings required) for the SAME suburb-and-zone combination as the best opportunity's own block — the realistic \"what does a normal lot look like in this zone\" benchmark preferred over the zone's bare legal minimum when working out lots_possible, since dividing by the legal floor alone assumes every new lot gets created at that minimum. Grouped by zone, not just suburb, so a suburb spanning several zones doesn't get one blended figure (see typical_house_lot_size_by_suburb). Distinct from Median Land Size (For Sale), which is the size of the (unusually large, by definition) subdivision-candidate blocks themselves, not ordinary lots generally." },
   { field: "bestHeightLimit", title: "Best Opportunity — Height Limit (m)", group: "Best Opportunity Detail",
     description: "Maximum building height permitted on the best opportunity's block, in metres — NSW only for now (no equivalent published layer for other states, see config.yaml's zoning: block)." },
   { field: "bestFloorSpaceRatio", title: "Best Opportunity — Floor Space Ratio", group: "Best Opportunity Detail",
     description: "Maximum floor space ratio permitted on the best opportunity's block — NSW only for now." },
   { field: "bestHeritageSignificance", title: "Best Opportunity — Heritage Listing", group: "Best Opportunity Detail",
     description: "Heritage significance (Local/State/National/World), where the best opportunity's block is heritage-listed — NSW only for now. Blank means not listed, not \"unknown\"." },
-  { field: "minLotSizeM2", title: "Min Lot Size (Zoning)", group: "Zoning & Council Rules",
-    description: "The effective minimum lot size actually used to work out how many new lots each of this suburb's candidates can be split into — whichever of Typical Lot Size (Suburb) or the zone's own published minimum applied (see build_site.py's calc_min_lot_m2), falling back further to subdivision.min_lot_size_fallback_m2 in config.yaml where neither is available. Median across this suburb's own candidates, which should normally already agree with each other almost exactly." },
-  { field: "typicalLotSizeM2", title: "Typical Lot Size (Suburb)", group: "Zoning & Council Rules",
-    description: "This suburb's own ordinary/typical House lot size (median, at least subdivision.min_comparables House listings required) — the realistic \"what does a normal lot look like here\" benchmark preferred over the zone's bare legal minimum when working out lots_possible, since dividing by the legal floor alone assumes every new lot gets created at that minimum. Distinct from Median Land Size (For Sale), which is the size of the (unusually large, by definition) subdivision-candidate blocks themselves, not ordinary lots generally." },
 ];
 
 const SUBDIVISION_DEFAULT_VISIBLE = new Set([
-  "area", "opportunityScore", "opportunityCount", "bestProfit",
-  "medianLandPriceForSale", "typicalLandSizeM2", "bestConfidence",
+  "area", "opportunityScore", "opportunityCount", "bestConfidence",
+  "medianLandPriceForSale", "typicalLandSizeM2",
 ]);
 
 function buildSubdivisionColumnDef(col) {
@@ -737,7 +769,7 @@ function buildSubdivisionColumnDef(col) {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => formatMoney(cell.getValue()) };
   }
   if (col.field === "typicalLandSizeM2" || col.field === "bestResultingLotM2"
-      || col.field === "minLotSizeM2" || col.field === "typicalLotSizeM2") {
+      || col.field === "bestMinLotSizeM2" || col.field === "bestTypicalLotSizeM2") {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
       const v = cell.getValue();
       return v == null ? "" : `${Math.round(v).toLocaleString()} m²`;
@@ -809,8 +841,30 @@ function renderListingDetail(listing, params) {
   const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost;
   const sellingCost = listing.est_total_revenue * (params.sellingCostsPct / 100);
   const netRevenue = listing.est_total_revenue - sellingCost;
+  const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
+  const aiSummaryHtml = listing.ai_summary && listing.ai_summary.length
+    ? `
+      <h4>AI subdivision notes</h4>
+      <ul class="listing-detail__ai-summary">
+        ${listing.ai_summary.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}
+      </ul>
+      <p class="modal-note">Generated from this listing's own description — may contain errors, not a substitute for reading the full ad.</p>
+    `
+    : "";
   return `
     <div class="listing-detail">
+      <h4>Land &amp; zoning</h4>
+      <div class="listing-detail__zoning">
+        <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
+        <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
+        <div><span>Typical lot size (this zone)</span><span>${m2(listing.typical_lot_m2)}</span></div>
+        <div><span>Min lot size (used for this calc)</span><span>${m2(listing.min_lot_m2)}</span></div>
+        <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
+        <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
+        <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
+      </div>
+      ${aiSummaryHtml}
+      <h4>Subdivision economics</h4>
       <div class="listing-detail__calc">
         <div><span>Purchase price</span><span>${formatMoney(listing.price)}</span></div>
         <div><span>Subdivision cost (${listing.lots_possible} × ${formatMoney(params.costPerLot)})</span><span>${formatMoney(subdivisionCost)}</span></div>
@@ -844,9 +898,10 @@ function openSuburbModal(group, params) {
     card.innerHTML = `
       <div class="listing-card__summary">
         <div class="listing-card__main">
-          <a href="${listing.url}" target="_blank" rel="noopener">${listing.address}</a>
+          <span class="listing-card__address">${listing.address}</span>
           <span class="listing-card__meta">${formatMoney(listing.price)} · ${Math.round(listing.land_size_m2).toLocaleString()} m²
             · ${listing.lots_possible} lots of ~${Math.round(listing.resulting_lot_m2)} m²${listing.zone ? ` · ${listing.zone}` : ""}</span>
+          <a class="listing-card__view-link" href="${listing.url}" target="_blank" rel="noopener">View listing ↗</a>
         </div>
         <div class="listing-card__profit">
           <span class="profit-positive">+${formatMoney(listing.profit)}</span>
@@ -857,6 +912,13 @@ function openSuburbModal(group, params) {
     `;
     const detail = card.querySelector(".listing-card__detail");
     const summary = card.querySelector(".listing-card__summary");
+    // Clicking the card expands/collapses the deep-dive detail — it should
+    // NOT also whisk the user off to the REA listing. The "View listing"
+    // link (its own explicit, separate action) opens REA instead;
+    // stopPropagation keeps that click from also toggling the detail panel
+    // underneath it.
+    const viewLink = card.querySelector(".listing-card__view-link");
+    viewLink.addEventListener("click", (e) => e.stopPropagation());
     summary.addEventListener("click", () => {
       const isOpen = !detail.hidden;
       if (isOpen) {
