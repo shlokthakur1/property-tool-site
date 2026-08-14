@@ -122,6 +122,7 @@ function buildColumnDef(col) {
       col.field === "land_size_m2" ||
       col.field === "suburb_comparable_count" ||
       col.field === "min_lot_size_m2" ||
+      col.field === "avg_lot_size_m2" ||
       col.field === "min_frontage_m" ||
       col.field === "irsad_aus_decile" ||
       col.field === "new_dwelling_approvals_fy" ||
@@ -131,6 +132,18 @@ function buildColumnDef(col) {
       col.field === "distance_to_gpo_km"
     ) {
       return { ...base, sorter: "number", hozAlign: "right" };
+    }
+    if (col.field === "sewer_connected") {
+      return {
+        ...base,
+        hozAlign: "center",
+        formatter: (cell) => {
+          const value = cell.getValue();
+          if (value === true) return "Yes";
+          if (value === false) return "No";
+          return "";
+        },
+      };
     }
     if (col.field === "non_res_building_approvals_value_fy" || col.field === "infrastructure_spend_per_capita") {
       return {
@@ -859,6 +872,7 @@ function renderListingDetail(listing, params) {
         <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
         <div><span>Typical lot size (this zone)</span><span>${m2(listing.typical_lot_m2)}</span></div>
         <div><span>Min lot size (used for this calc)</span><span>${m2(listing.min_lot_m2)}</span></div>
+        <div><span>Sewer connected</span><span>${listing.sewer_connected === true ? "Yes" : listing.sewer_connected === false ? "No" : "Unknown"}</span></div>
         <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
         <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
         <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
