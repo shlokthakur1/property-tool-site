@@ -661,6 +661,9 @@ function buildSuburbGroups(listings, params, qb) {
       bestHeightLimit: best.height_limit_m,
       bestFloorSpaceRatio: best.floor_space_ratio,
       bestHeritageSignificance: best.heritage_significance,
+      // WA/TAS only (see enrich_sewer.py) — same "best opportunity's own
+      // figure" convention as the fields above.
+      bestSewerConnected: best.sewer_connected,
       listings: items,
     });
   }
@@ -741,6 +744,8 @@ const SUBDIVISION_COLUMNS = [
     description: "Maximum floor space ratio permitted on the best opportunity's block — NSW only for now." },
   { field: "bestHeritageSignificance", title: "Best Opportunity — Heritage Listing", group: "Best Opportunity Detail",
     description: "Heritage significance (Local/State/National/World), where the best opportunity's block is heritage-listed — NSW only for now. Blank means not listed, not \"unknown\"." },
+  { field: "bestSewerConnected", title: "Best Opportunity — Sewer Connected", group: "Best Opportunity Detail",
+    description: "True if a real, constructed sewer connection was found within 100m of the best opportunity's block (Water Corporation WA / TasWater's own public spatial data — see enrich_sewer.py) — WA and TAS only for now. Matters because it decides whether Min Lot Size (Zoning) trusts the zone's own average site area over Typical Lot Size (Zone) — see effective_min_lot_size in build_site.py. Blank means the state isn't covered or the lookup hasn't run yet, not \"not connected\"." },
 ];
 
 const SUBDIVISION_DEFAULT_VISIBLE = new Set([
@@ -792,6 +797,14 @@ function buildSubdivisionColumnDef(col) {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
       const v = cell.getValue();
       return v == null ? "" : `${v} m`;
+    } };
+  }
+  if (col.field === "bestSewerConnected") {
+    return { ...base, hozAlign: "center", formatter: (cell) => {
+      const v = cell.getValue();
+      if (v === true) return "Yes";
+      if (v === false) return "No";
+      return "";
     } };
   }
   if (col.field === "bestFloorSpaceRatio") {
@@ -986,6 +999,11 @@ function buildSubdivisionFieldCatalog(listings) {
     { field: "land_size_m2", label: "Land (m²)", type: "number" },
     { field: "lots_possible", label: "Lots Possible", type: "number" },
     { field: "confidence", label: "Comp Confidence (0-1)", type: "number" },
+    // WA/TAS only (see enrich_sewer.py) — "true"/"false" as literal option
+    // text (raw distinct values, same convention as every other categorical
+    // field here, e.g. zone/state) rather than "Yes"/"No" labels; use
+    // "Equals" → true to show only sewer-connected land.
+    { field: "sewer_connected", label: "Sewer Connected", type: "categorical" },
   ];
   return fields.map((f) => (f.type === "categorical" ? { ...f, options: distinctValues(listings, f.field) } : f));
 }
