@@ -836,15 +836,33 @@ function renderCompsTable(comps) {
       <td>${c.url ? `<a href="${c.url}" target="_blank" rel="noopener">${c.address ?? "—"}</a>` : (c.address ?? "—")}</td>
       <td>${c.land_size_m2 != null ? `${Math.round(c.land_size_m2).toLocaleString()} m²` : "—"}</td>
       <td>${formatMoney(c.price)}</td>
+      <td>${c.price_per_m2 != null ? `$${Math.round(c.price_per_m2).toLocaleString()}/m²` : "—"}</td>
       <td>${c.sold_date ?? "—"}</td>
     </tr>
   `).join("");
   return `
     <table class="comps-table">
-      <thead><tr><th>Address</th><th>Land</th><th>Sold price</th><th>Sold date</th></tr></thead>
+      <thead><tr><th>Address</th><th>Land</th><th>Sold price</th><th>Price/m²</th><th>Sold date</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
+}
+
+// comp_method reflects how comp_median_price/est_total_revenue were derived
+// (see build_subdivision_listings in build_site.py) — surfaced here so a
+// rate-based estimate is never mistaken for the more reliable size-matched
+// one.
+function compMethodLabel(method) {
+  switch (method) {
+    case "size_matched":
+      return "sold comps close to this exact resulting lot size";
+    case "rate_per_m2_sewer_matched":
+      return "estimated from this suburb's $/m² rate — comps sharing this listing's sewer status, not size-matched";
+    case "rate_per_m2":
+      return "estimated from this suburb's $/m² rate — no size or sewer-status match, least reliable";
+    default:
+      return null;
+  }
 }
 
 function renderListingDetail(listing, params) {
@@ -891,8 +909,8 @@ function renderListingDetail(listing, params) {
         <div class="listing-detail__total"><span>Estimated profit</span><span class="profit-positive">+${formatMoney(listing.profit)}</span></div>
       </div>
       <h4>Comparables used (${listing.comp_count}, ${confidenceLabel(listing.confidence)} confidence)</h4>
-      <p class="modal-note">Sold vacant land in ${listing.suburb}, sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot
-        — median ${formatMoney(listing.comp_median_price)}, range ${formatMoney(listing.comp_min_price)}–${formatMoney(listing.comp_max_price)}.</p>
+      <p class="modal-note">Sold vacant land in ${listing.suburb} — ${compMethodLabel(listing.comp_method) ?? `sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot`}
+        — median ${formatMoney(listing.comp_median_price)}${listing.comp_method === "size_matched" ? "" : ` (rate-estimated for a ${Math.round(listing.resulting_lot_m2)}m² lot)`}, range ${formatMoney(listing.comp_min_price)}–${formatMoney(listing.comp_max_price)}.</p>
       ${renderCompsTable(listing.comps)}
     </div>
   `;
