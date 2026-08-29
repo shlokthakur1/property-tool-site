@@ -559,15 +559,90 @@ function updateRowCount(table, countEl, noun) {
 // listings rather than pre-aggregated rows, since grouping itself depends
 // on the live assumptions.
 // ─────────────────────────────────────────────────────────────────────────────
-const subdivisionParams = { costPerLot: 0, stampDutyBufferPct: 0, sellingCostsPct: 0, holdingCostsPct: 0 };
+const subdivisionParams = {
+  surveyorCost: 0, planningCost: 0,
+  waterConnectionCostPerLot: 0, powerConnectionCostPerLot: 0, gasConnectionCostPerLot: 0,
+  sewerConnectionCostPerLot: 0, extendServicesCost: 0,
+  stampDutyBufferPct: 0, sellingCostsPct: 0, holdingCostsPct: 0,
+};
 
-function computeProfit(listing, params) {
-  const subdivisionCost = params.costPerLot * listing.lots_possible;
+// Per-listing assumption overrides (2026-08, user-requested: "make the
+// assumptions editable when looking at a specific listing itself") — keyed
+// by listing_id, only ever holding the keys a user has actually changed for
+// that one block via the listing detail panel. Scoped deliberately narrow:
+// editing a listing's own numbers recomputes ITS OWN profit/report on the
+// spot, but never rewrites the shared subdivisionParams defaults or
+// retriggers the suburb table's grouping/ranking — those still reflect the
+// Assumptions panel's global inputs, same as before. Lives for the page
+// session only (not persisted), same as subdivisionParams.
+const subdivisionListingOverrides = new Map();
+
+function getListingParams(listing) {
+  const override = subdivisionListingOverrides.get(listing.listing_id);
+  return { ...subdivisionParams, otherCosts: SUBDIVISION_OTHER_COSTS_FIELD.fallback, ...override };
+}
+
+function setListingParamOverride(listing, key, value) {
+  const existing = subdivisionListingOverrides.get(listing.listing_id) || {};
+  subdivisionListingOverrides.set(listing.listing_id, { ...existing, [key]: value });
+}
+
+// Full subdivision cost/revenue breakdown for one candidate listing, given a
+// params object (either the global subdivisionParams used for the suburb
+// table, or a per-listing override merged on top of it — see
+// getListingParams). Replaces the old single `costPerLot` lump sum
+// (2026-08) with real line items: land surveyor and planning/council fees
+// are flat one-off costs for the whole subdivision (the paperwork doesn't
+// multiply per lot); water/power/gas/sewer connections are per NEW lot
+// (each needs its own service connection); extendServicesCost is a flat
+// contingency applied only when the block ISN'T already sewer-connected —
+// the one service this pipeline has real connectivity data for
+// (sewer_connected, WA/TAS only — see enrich_sewer.py). Water/electricity
+// connectivity has no equivalent data source anywhere in this pipeline, so
+// their per-lot costs are always applied at the flat rate rather than
+// guessed at being "already connected" — see the Land & zoning section of
+// the listing detail, which says so explicitly rather than fabricating a
+// Yes/No. `otherCosts` only ever comes from a per-listing override
+// (params.otherCosts defaults to 0 via ?? below) — there's no global
+// default for it, since by definition it's whatever this specific block
+// needs that the standard line items don't cover.
+function computeSubdivisionEconomics(listing, params) {
+  const lots = listing.lots_possible;
+  const sewerConnected = listing.sewer_connected === true;
+  const waterCost = params.waterConnectionCostPerLot * lots;
+  const powerCost = params.powerConnectionCostPerLot * lots;
+  const gasCost = params.gasConnectionCostPerLot * lots;
+  const sewerCost = params.sewerConnectionCostPerLot * lots;
+  const extendServicesCost = sewerConnected ? 0 : params.extendServicesCost;
+  const subdivisionCost = params.surveyorCost + params.planningCost + waterCost + powerCost + gasCost + sewerCost + extendServicesCost;
   const stampDuty = listing.price * (params.stampDutyBufferPct / 100);
   const holdingCost = listing.price * (params.holdingCostsPct / 100);
-  const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost;
+  const otherCosts = params.otherCosts ?? 0;
+  const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost + otherCosts;
   const sellingCost = listing.est_total_revenue * (params.sellingCostsPct / 100);
-  return listing.est_total_revenue - sellingCost - totalCost;
+  const netRevenue = listing.est_total_revenue - sellingCost;
+  const profit = netRevenue - totalCost;
+  return {
+    lots, sewerConnected, waterCost, powerCost, gasCost, sewerCost, extendServicesCost,
+    surveyorCost: params.surveyorCost, planningCost: params.planningCost,
+    subdivisionCost, stampDuty, holdingCost, otherCosts, totalCost, sellingCost, netRevenue, profit,
+  };
+}
+
+function computeProfit(listing, params) {
+  return computeSubdivisionEconomics(listing, params).profit;
+}
+
+// Shared profit rendering — red/green, sign-aware, used by the suburb table
+// column, the drill-down listing cards and the listing detail panel so an
+// unprofitable candidate (kept in the results, not filtered out — see
+// buildSuburbGroups) reads unmistakably as a loss rather than a plain
+// number.
+function profitBadge(value) {
+  if (value == null) return "";
+  const cls = value >= 0 ? "profit-positive" : "profit-negative";
+  const sign = value >= 0 ? "+" : "−";
+  return `<span class="${cls}">${sign}${formatMoney(Math.abs(value))}</span>`;
 }
 
 function confidenceLabel(confidence) {
@@ -592,18 +667,27 @@ function percentileRank(sortedValues, value) {
   return lo / sortedValues.length;
 }
 
-// Groups profitable (after live assumptions), filter-matching listings by
-// suburb+state. A suburb's headline profit/confidence/best-opportunity
-// detail columns are its single best opportunity's own numbers — that's
-// the one an investor would actually pursue — with the rest of the
-// suburb's opportunities available on drill-in.
+// Groups filter-matching listings by suburb+state — profitable AND
+// unprofitable alike (2026-08, user-requested: an unprofitable candidate
+// under the CURRENT assumptions is still useful to see, e.g. to check how
+// close it is, or after tweaking the cost assumptions — it's no longer
+// dropped from the suburb's listings or from the table entirely if it was
+// the suburb's only candidate). A suburb's headline profit/confidence/
+// best-opportunity detail columns are its single best opportunity's own
+// numbers (highest profit, even if that's still a loss) — that's the one
+// an investor would actually pursue, or the least-bad option if none of
+// this suburb's candidates pencil out — with the rest of the suburb's
+// opportunities available on drill-in.
 //
 // Opportunity Score is our own composite ranking (requested as "based on
 // number of opportunities, best est. profit & data confidence", no fixed
-// weights given) — 50% best profit, 30% opportunity count, 20% data
-// confidence. Profit gets the largest weight since it's the actual dollar
-// upside; opportunity count is a secondary signal (a suburb with many
-// candidates is a richer hunting ground, not reliant on one lucky find);
+// weights given) — 50% best profit, 30% (profitable) opportunity count,
+// 20% data confidence. Profit gets the largest weight since it's the
+// actual dollar upside; opportunity count is a secondary signal (a suburb
+// with many profitable candidates is a richer hunting ground, not reliant
+// on one lucky find) — deliberately still counts PROFITABLE candidates
+// only (candidateCount below is the unfiltered total), so a suburb full of
+// losses doesn't outrank one with fewer candidates that actually work;
 // confidence tempers both so a huge-but-shaky estimate doesn't outrank a
 // smaller, well-evidenced one. Profit and count are unbounded and skewed,
 // so both are percentile-ranked against every other qualifying suburb (same
@@ -614,7 +698,6 @@ function buildSuburbGroups(listings, params, qb) {
   for (const listing of listings) {
     if (qb && !qb.matches(listing)) continue;
     const profit = computeProfit(listing, params);
-    if (profit <= 0) continue;
     const key = `${listing.suburb}||${listing.state}`;
     const scored = { ...listing, profit };
     if (!bySuburb.has(key)) bySuburb.set(key, []);
@@ -630,26 +713,29 @@ function buildSuburbGroups(listings, params, qb) {
       state: best.state,
       postcode: best.postcode,
       area: formatArea(best.suburb, best.state, best.postcode),
-      opportunityCount: items.length,
+      opportunityCount: items.filter((i) => i.profit > 0).length,
+      candidateCount: items.length,
       bestProfit: best.profit,
       bestConfidence: best.confidence,
       medianLandPriceForSale: median(items.map((i) => i.price).filter((v) => v != null)),
       typicalLandSizeM2: median(items.map((i) => i.land_size_m2).filter((v) => v != null)),
-      // Min Lot Size / Typical Lot Size — the two inputs behind the best
-      // opportunity's own lots_possible calc (see calc_min_lot_m2 in
-      // build_site.py): min_lot_m2 is whichever of the two actually applied
-      // (typical, else zoning, else the flat fallback), typical_lot_m2 is
-      // this suburb's own ordinary House lot size WITHIN THE SAME ZONE as
-      // the best opportunity (build_site.py's typical_house_lot_size_by_suburb
-      // groups by zone specifically, not just suburb — a suburb spanning
-      // several zones can have very different typical lot sizes zone to
-      // zone). Deliberately the BEST opportunity's own figures, not a
-      // median across every candidate in the suburb — this suburb's other
-      // candidates can easily sit in a different zone with a genuinely
-      // different typical/min lot size, and blending them together would
-      // be exactly the kind of misleading average this pipeline avoids
-      // elsewhere (2026-08, user-requested: this should read per zone).
-      bestMinLotSizeM2: best.min_lot_m2,
+      // Avg Lot Size (Council) / Typical Lot Size — avg_lot_m2 is the real,
+      // published average site area (see council_avg_lot_size in
+      // build_site.py) actually used as the best opportunity's own
+      // lots_possible divisor; typical_lot_m2 is this suburb's own ordinary
+      // House lot size WITHIN THE SAME ZONE as the best opportunity
+      // (build_site.py's typical_house_lot_size_by_suburb groups by zone
+      // specifically, not just suburb), shown as an informational
+      // sense-check only — it plays no part in the divisor (2026-08,
+      // user-requested: only a real published council/zoning average should
+      // ever drive the lots_possible calc, never a same-zone proxy or the
+      // zone's bare legal minimum). Deliberately the BEST opportunity's own
+      // figures, not a median across every candidate in the suburb — this
+      // suburb's other candidates can easily sit in a different zone with a
+      // genuinely different average, and blending them together would be
+      // exactly the kind of misleading average this pipeline avoids
+      // elsewhere.
+      bestAvgLotSizeM2: best.avg_lot_m2,
       bestTypicalLotSizeM2: best.typical_lot_m2,
       bestLotsPossible: best.lots_possible,
       bestResultingLotM2: best.resulting_lot_m2,
@@ -714,12 +800,14 @@ function escapeHtml(str) {
 const SUBDIVISION_COLUMNS = [
   { field: "area", title: "Area", group: "Identity", description: "Suburb, state and postcode combined into one column." },
   { field: "opportunityScore", title: "Opportunity Score", group: "Opportunity",
-    description: "Our own 0-100 composite ranking — 50% best est. profit, 30% number of opportunities, 20% data confidence. Profit and opportunity count are percentile-ranked against every other suburb with at least one profitable candidate under the current assumptions; confidence is already a 0-1 fraction so it's used directly. This is the table's default sort key.",
+    description: "Our own 0-100 composite ranking — 50% best est. profit, 30% number of PROFITABLE opportunities, 20% data confidence. Profit and opportunity count are percentile-ranked against every other suburb with at least one subdivision candidate under the current assumptions; confidence is already a 0-1 fraction so it's used directly. This is the table's default sort key. Suburbs are never excluded from this ranking for being unprofitable — an all-loss suburb just scores low and sorts to the bottom, rather than disappearing.",
     formula: "round(100 * (0.5 * pctrank(bestProfit) + 0.3 * pctrank(opportunityCount) + 0.2 * bestConfidence))" },
   { field: "opportunityCount", title: "Subdivision Opportunities", group: "Opportunity",
-    description: "Number of currently-For-Sale blocks in this suburb that are profitable to subdivide under the current assumptions (see the Assumptions panel) and pass the active filters." },
+    description: "Number of currently-For-Sale blocks in this suburb that are PROFITABLE to subdivide under the current assumptions (see the Assumptions panel) and pass the active filters. See Total Candidates for the unfiltered count including unprofitable ones." },
+  { field: "candidateCount", title: "Total Candidates", group: "Opportunity",
+    description: "Every currently-For-Sale subdivision-candidate block in this suburb passing the active filters, whether or not it's profitable under the current assumptions — 2026-08, unprofitable candidates are no longer hidden from the table or the drill-down, only ranked lower (see Opportunity Score). Click the row to see all of them, including the unprofitable ones." },
   { field: "bestProfit", title: "Best Est. Profit", group: "Opportunity",
-    description: "Estimated profit of this suburb's single best opportunity — purchase price plus subdivision cost, stamp duty and holding costs, against comp-backed resale revenue less selling costs. See the Assumptions panel for the live cost inputs, and click a suburb row for the full breakdown." },
+    description: "Estimated profit of this suburb's single best opportunity (highest profit — or least-bad loss, if none of this suburb's candidates are profitable) — purchase price plus subdivision cost, stamp duty and holding costs, against comp-backed resale revenue less selling costs. See the Assumptions panel for the live cost inputs, and click a suburb row for the full breakdown, editable per listing." },
   { field: "bestConfidence", title: "Data Confidence", group: "Opportunity",
     description: "How many comparable sold vacant-land listings back the best opportunity's resale estimate, 0-1 (shown as a High/Medium/Low badge). Scales linearly between subdivision.min_comparables and subdivision.confidence_comp_target in config.yaml." },
   { field: "medianLandPriceForSale", title: "Median Price (Land For Sale)", group: "Land For Sale Now",
@@ -734,10 +822,10 @@ const SUBDIVISION_COLUMNS = [
     description: "Number of comparable sold vacant-land listings behind the best opportunity's resale estimate." },
   { field: "bestZone", title: "Best Opportunity — Zone", group: "Best Opportunity Detail",
     description: "Planning zone of the best opportunity's block, where known." },
-  { field: "bestMinLotSizeM2", title: "Best Opportunity — Min Lot Size (Zoning)", group: "Best Opportunity Detail",
-    description: "The effective minimum lot size used to work out how many new lots the best opportunity's own block can be split into — whichever of Typical Lot Size (Zone) or that zone's own published minimum applied (see build_site.py's calc_min_lot_m2), falling back further to subdivision.min_lot_size_fallback_m2 in config.yaml where neither is available (never for VIC zone types with no lot-size concept in law at all — see VIC_NO_LOT_SIZE_ZONE_TYPES). Specific to the best opportunity's own zone, not a suburb-wide figure — a suburb spanning several zones can have a genuinely different minimum zone to zone." },
+  { field: "bestAvgLotSizeM2", title: "Best Opportunity — Avg Lot Size (Council)", group: "Best Opportunity Detail",
+    description: "The real, published average site-area-per-dwelling figure actually used to work out how many new lots the best opportunity's own block can be split into (see build_site.py's council_avg_lot_size) — currently WA only, sourced from R-Codes Table D via enrich_zoning.py, no fallback to the zone's bare legal minimum or to Typical Lot Size (Zone). A block whose zone has no real published average is excluded from consideration entirely rather than sized against an invented or proxy figure — for now this means only WA opportunities can appear here." },
   { field: "bestTypicalLotSizeM2", title: "Best Opportunity — Typical Lot Size (Zone)", group: "Best Opportunity Detail",
-    description: "The ordinary/typical House lot size (median, at least subdivision.min_comparables House listings required) for the SAME suburb-and-zone combination as the best opportunity's own block — the realistic \"what does a normal lot look like in this zone\" benchmark preferred over the zone's bare legal minimum when working out lots_possible, since dividing by the legal floor alone assumes every new lot gets created at that minimum. Grouped by zone, not just suburb, so a suburb spanning several zones doesn't get one blended figure (see typical_house_lot_size_by_suburb). Distinct from Median Land Size (For Sale), which is the size of the (unusually large, by definition) subdivision-candidate blocks themselves, not ordinary lots generally." },
+    description: "The ordinary/typical House lot size (median, at least subdivision.min_comparables House listings required) for the SAME suburb-and-zone combination as the best opportunity's own block — an informational sense-check only, showing \"what does a normal lot look like in this zone\". Grouped by zone, not just suburb, so a suburb spanning several zones doesn't get one blended figure (see typical_house_lot_size_by_suburb). Plays no part in the lots_possible calc (see Avg Lot Size (Council) above) and is distinct from Median Land Size (For Sale), which is the size of the (unusually large, by definition) subdivision-candidate blocks themselves, not ordinary lots generally." },
   { field: "bestHeightLimit", title: "Best Opportunity — Height Limit (m)", group: "Best Opportunity Detail",
     description: "Maximum building height permitted on the best opportunity's block, in metres — NSW only for now (no equivalent published layer for other states, see config.yaml's zoning: block)." },
   { field: "bestFloorSpaceRatio", title: "Best Opportunity — Floor Space Ratio", group: "Best Opportunity Detail",
@@ -745,11 +833,11 @@ const SUBDIVISION_COLUMNS = [
   { field: "bestHeritageSignificance", title: "Best Opportunity — Heritage Listing", group: "Best Opportunity Detail",
     description: "Heritage significance (Local/State/National/World), where the best opportunity's block is heritage-listed — NSW only for now. Blank means not listed, not \"unknown\"." },
   { field: "bestSewerConnected", title: "Best Opportunity — Sewer Connected", group: "Best Opportunity Detail",
-    description: "True if a real, constructed sewer connection was found within 100m of the best opportunity's block (Water Corporation WA / TasWater's own public spatial data — see enrich_sewer.py) — WA and TAS only for now. Matters because it decides whether Min Lot Size (Zoning) trusts the zone's own average site area over Typical Lot Size (Zone) — see effective_min_lot_size in build_site.py. Blank means the state isn't covered or the lookup hasn't run yet, not \"not connected\"." },
+    description: "True if a real, constructed sewer connection was found within 100m of the best opportunity's block (Water Corporation WA / TasWater's own public spatial data — see enrich_sewer.py) — WA and TAS only for now. Informational context only — it plays no part in the lots_possible calc (see Avg Lot Size (Council) above). Blank means the state isn't covered or the lookup hasn't run yet, not \"not connected\"." },
 ];
 
 const SUBDIVISION_DEFAULT_VISIBLE = new Set([
-  "area", "opportunityScore", "opportunityCount", "bestConfidence",
+  "area", "opportunityScore", "opportunityCount", "candidateCount", "bestConfidence",
   "medianLandPriceForSale", "typicalLandSizeM2",
 ]);
 
@@ -763,17 +851,14 @@ function buildSubdivisionColumnDef(col) {
       return `<span class="pt-score ${scoreColorClass(v)}">${Math.round(v)}</span>`;
     } };
   }
-  if (col.field === "opportunityCount" || col.field === "bestLotsPossible" || col.field === "bestCompCount") {
+  if (col.field === "opportunityCount" || col.field === "candidateCount" || col.field === "bestLotsPossible" || col.field === "bestCompCount") {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
       const v = cell.getValue();
       return v == null ? "" : v.toLocaleString();
     } };
   }
   if (col.field === "bestProfit") {
-    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
-      const v = cell.getValue();
-      return v == null ? "" : `<span class="profit-positive">+${formatMoney(v)}</span>`;
-    } };
+    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => profitBadge(cell.getValue()) };
   }
   if (col.field === "bestConfidence") {
     return { ...base, sorter: "number", width: 130, formatter: (cell) => {
@@ -787,7 +872,7 @@ function buildSubdivisionColumnDef(col) {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => formatMoney(cell.getValue()) };
   }
   if (col.field === "typicalLandSizeM2" || col.field === "bestResultingLotM2"
-      || col.field === "bestMinLotSizeM2" || col.field === "bestTypicalLotSizeM2") {
+      || col.field === "bestAvgLotSizeM2" || col.field === "bestTypicalLotSizeM2") {
     return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
       const v = cell.getValue();
       return v == null ? "" : `${Math.round(v).toLocaleString()} m²`;
@@ -878,13 +963,18 @@ function compMethodLabel(method) {
   }
 }
 
-function renderListingDetail(listing, params) {
-  const subdivisionCost = params.costPerLot * listing.lots_possible;
-  const stampDuty = listing.price * (params.stampDutyBufferPct / 100);
-  const holdingCost = listing.price * (params.holdingCostsPct / 100);
-  const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost;
-  const sellingCost = listing.est_total_revenue * (params.sellingCostsPct / 100);
-  const netRevenue = listing.est_total_revenue - sellingCost;
+// Builds the expandable per-listing deep-dive as real DOM (not an innerHTML
+// string, unlike most of this file) — the whole point is that every cost
+// line is a live <input>, and rebuilding via innerHTML on each keystroke
+// would drop focus/cursor position mid-edit. Edits are written to
+// subdivisionListingOverrides (see getListingParams/setListingParamOverride)
+// so they survive collapsing/re-expanding the card within the same modal
+// session, and `onProfitChange` lets the summary row's profit badge above
+// update live as the user edits, without re-rendering the whole card.
+function buildListingDetailElement(listing, group, onProfitChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "listing-detail";
+
   const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
   const aiSummaryHtml = listing.ai_summary && listing.ai_summary.length
     ? `
@@ -895,49 +985,280 @@ function renderListingDetail(listing, params) {
       <p class="modal-note">Generated from this listing's own description — may contain errors, not a substitute for reading the full ad.</p>
     `
     : "";
-  return `
-    <div class="listing-detail">
-      <h4>Land &amp; zoning</h4>
-      <div class="listing-detail__zoning">
-        <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
-        <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
-        <div><span>Typical lot size (this zone)</span><span>${m2(listing.typical_lot_m2)}</span></div>
-        <div><span>Min lot size (used for this calc)</span><span>${m2(listing.min_lot_m2)}</span></div>
-        <div><span>Sewer connected</span><span>${listing.sewer_connected === true ? "Yes" : listing.sewer_connected === false ? "No" : "Unknown"}</span></div>
-        <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
-        <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
-        <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
-      </div>
-      ${aiSummaryHtml}
-      <h4>Subdivision economics</h4>
-      <div class="listing-detail__calc">
-        <div><span>Purchase price</span><span>${formatMoney(listing.price)}</span></div>
-        <div><span>Subdivision cost (${listing.lots_possible} × ${formatMoney(params.costPerLot)})</span><span>${formatMoney(subdivisionCost)}</span></div>
-        <div><span>Stamp duty (${params.stampDutyBufferPct}%)</span><span>${formatMoney(stampDuty)}</span></div>
-        <div><span>Holding costs (${params.holdingCostsPct}% of price)</span><span>${formatMoney(holdingCost)}</span></div>
-        <div class="listing-detail__total"><span>Total cost</span><span>${formatMoney(totalCost)}</span></div>
-        <div><span>Comp median price × ${listing.lots_possible} lots</span><span>${formatMoney(listing.est_total_revenue)}</span></div>
-        <div><span>Selling costs (${params.sellingCostsPct}% of revenue)</span><span>-${formatMoney(sellingCost)}</span></div>
-        <div><span>Net revenue</span><span>${formatMoney(netRevenue)}</span></div>
-        <div class="listing-detail__total"><span>Estimated profit</span><span class="profit-positive">+${formatMoney(listing.profit)}</span></div>
-      </div>
-      <h4>Comparables used (${listing.comp_count}, ${confidenceLabel(listing.confidence)} confidence)</h4>
-      <p class="modal-note">Sold vacant land in ${listing.suburb} — ${compMethodLabel(listing.comp_method) ?? `sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot`}
-        — median ${formatMoney(listing.comp_median_price)}${listing.comp_method === "size_matched" ? "" : ` (rate-estimated for a ${Math.round(listing.resulting_lot_m2)}m² lot)`}, range ${formatMoney(listing.comp_min_price)}–${formatMoney(listing.comp_max_price)}.</p>
-      ${renderCompsTable(listing.comps)}
+
+  wrap.innerHTML = `
+    <h4>Land &amp; zoning</h4>
+    <div class="listing-detail__zoning">
+      <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
+      <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
+      <div><span>Typical lot size (this zone, informational)</span><span>${m2(listing.typical_lot_m2)}</span></div>
+      <div><span>Avg lot size (council — used for this calc)</span><span>${m2(listing.avg_lot_m2)}</span></div>
+      <div><span>Sewer connected</span><span>${listing.sewer_connected === true ? "Yes" : listing.sewer_connected === false ? "No" : "Unknown"}</span></div>
+      <div><span>Water / electricity connected</span><span>Not tracked — no published connectivity data source for these two services (unlike sewer), always costed as a new connection below</span></div>
+      <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
+      <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
+      <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
     </div>
+    ${aiSummaryHtml}
+    <h4>Subdivision economics <span class="listing-detail__hint">— every line below is editable, for this listing only</span></h4>
+    <div class="listing-detail__calc"></div>
+    <h4>Comparables used (${listing.comp_count}, ${confidenceLabel(listing.confidence)} confidence)</h4>
+    <p class="modal-note">Sold vacant land in ${listing.suburb} — ${compMethodLabel(listing.comp_method) ?? `sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot`}
+      — median ${formatMoney(listing.comp_median_price)}${listing.comp_method === "size_matched" ? "" : ` (rate-estimated for a ${Math.round(listing.resulting_lot_m2)}m² lot)`}, range ${formatMoney(listing.comp_min_price)}–${formatMoney(listing.comp_max_price)}.</p>
+    ${renderCompsTable(listing.comps)}
+    <div class="listing-detail__actions"></div>
   `;
+
+  const calc = wrap.querySelector(".listing-detail__calc");
+
+  const purchaseRow = document.createElement("div");
+  purchaseRow.innerHTML = `<span>Purchase price</span><span>${formatMoney(listing.price)}</span>`;
+  calc.appendChild(purchaseRow);
+
+  function addEditableRow(field) {
+    const row = document.createElement("div");
+    row.className = "listing-detail__calc-row";
+    const label = document.createElement("span");
+    label.textContent = subdivisionLineItemLabel(field, listing);
+    const valueWrap = document.createElement("span");
+    valueWrap.className = "listing-detail__calc-value";
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = String(field.step);
+    input.className = "listing-detail__calc-input";
+    input.value = getListingParams(listing)[field.key] ?? field.fallback;
+    const amount = document.createElement("span");
+    amount.className = "listing-detail__calc-amount";
+    valueWrap.appendChild(input);
+    valueWrap.appendChild(amount);
+    row.appendChild(label);
+    row.appendChild(valueWrap);
+    calc.appendChild(row);
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      setListingParamOverride(listing, field.key, Number.isFinite(v) ? v : 0);
+      recompute();
+    });
+    return amount;
+  }
+
+  const costAmounts = {};
+  SUBDIVISION_COST_FIELDS.forEach((f) => { costAmounts[f.key] = addEditableRow(f); });
+
+  const totalCostRow = document.createElement("div");
+  totalCostRow.className = "listing-detail__total";
+  totalCostRow.innerHTML = "<span>Total cost</span><span></span>";
+  calc.appendChild(totalCostRow);
+  const totalCostAmount = totalCostRow.querySelector("span:last-child");
+
+  const revenueRow = document.createElement("div");
+  revenueRow.innerHTML = `<span>Comp median price × ${listing.lots_possible} lots</span><span>${formatMoney(listing.est_total_revenue)}</span>`;
+  calc.appendChild(revenueRow);
+
+  const sellingAmount = addEditableRow(SUBDIVISION_SELLING_FIELD);
+
+  const netRevenueRow = document.createElement("div");
+  netRevenueRow.className = "listing-detail__total";
+  netRevenueRow.innerHTML = "<span>Net revenue</span><span></span>";
+  calc.appendChild(netRevenueRow);
+  const netRevenueAmount = netRevenueRow.querySelector("span:last-child");
+
+  const profitRow = document.createElement("div");
+  profitRow.className = "listing-detail__total";
+  profitRow.innerHTML = "<span>Estimated profit</span><span></span>";
+  calc.appendChild(profitRow);
+  const profitAmount = profitRow.querySelector("span:last-child");
+
+  let lastEco = null;
+  function recompute() {
+    const params = getListingParams(listing);
+    const eco = computeSubdivisionEconomics(listing, params);
+    lastEco = eco;
+    Object.entries(costAmounts).forEach(([key, el]) => {
+      const value = subdivisionLineItemAmount(key, eco);
+      const note = key === "extendServicesCost" && eco.sewerConnected ? " (not applied — already sewer-connected)" : "";
+      el.textContent = `${formatMoney(value)}${note}`;
+    });
+    sellingAmount.textContent = `-${formatMoney(eco.sellingCost)}`;
+    totalCostAmount.textContent = formatMoney(eco.totalCost);
+    netRevenueAmount.textContent = formatMoney(eco.netRevenue);
+    profitAmount.innerHTML = profitBadge(eco.profit);
+    if (onProfitChange) onProfitChange(eco.profit);
+    return eco;
+  }
+  recompute();
+
+  const actions = wrap.querySelector(".listing-detail__actions");
+  const reportBtn = document.createElement("button");
+  reportBtn.type = "button";
+  reportBtn.className = "btn btn--secondary";
+  reportBtn.textContent = "Download feasibility report";
+  reportBtn.addEventListener("click", () => {
+    downloadFeasibilityReport(listing, getListingParams(listing), lastEco, group);
+  });
+  actions.appendChild(reportBtn);
+
+  return wrap;
 }
 
-function openSuburbModal(group, params) {
+// Standalone feasibility-study document for one listing (2026-08,
+// user-requested) — a real .html file, self-contained (inline CSS, no
+// external assets) so it opens and prints cleanly outside the site, built
+// from whatever the user has currently edited in the listing detail panel
+// (params/eco), not the raw defaults. "Comparables — smaller lot sales" is
+// the same comps this listing's own resale estimate is based on; "Other
+// subdivision opportunities nearby" is every OTHER subdivision-candidate
+// block this tool has found in the same suburb — evidence the arbitrage
+// pattern recurs here, not a record of subdivisions that have actually
+// been completed (this pipeline has no data source for that, and the
+// report says so rather than implying otherwise).
+function buildFeasibilityReportHtml(listing, params, eco, group) {
+  const generatedAt = new Date().toLocaleString("en-AU");
+  const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
+
+  const costRows = SUBDIVISION_COST_FIELDS.map((f) => {
+    const value = subdivisionLineItemAmount(f.key, eco);
+    const note = f.key === "extendServicesCost" && eco.sewerConnected ? " (not applied — already sewer-connected)" : "";
+    return `<tr><td>${subdivisionLineItemLabel(f, listing)}</td><td class="num">${formatMoney(value)}${note}</td></tr>`;
+  }).join("");
+
+  const compsHtml = listing.comps && listing.comps.length
+    ? `<table class="tbl"><thead><tr><th>Address</th><th>Land</th><th>Sold price</th><th>Price/m²</th><th>Sold date</th></tr></thead><tbody>
+        ${listing.comps.map((c) => `
+          <tr>
+            <td>${c.url ? `<a href="${c.url}">${c.address ?? "—"}</a>` : (c.address ?? "—")}</td>
+            <td class="num">${m2(c.land_size_m2)}</td>
+            <td class="num">${formatMoney(c.price)}</td>
+            <td class="num">${c.price_per_m2 != null ? `$${Math.round(c.price_per_m2).toLocaleString()}/m²` : "—"}</td>
+            <td>${c.sold_date ?? "—"}</td>
+          </tr>`).join("")}
+      </tbody></table>`
+    : `<p class="note">No comparable sale details available.</p>`;
+
+  const otherListings = (group?.listings || []).filter((l) => l.listing_id !== listing.listing_id);
+  const precedentsHtml = otherListings.length
+    ? `<table class="tbl"><thead><tr><th>Address</th><th>Price</th><th>Land</th><th>Lots possible</th><th>Est. profit (current assumptions)</th></tr></thead><tbody>
+        ${otherListings.map((l) => `
+          <tr>
+            <td>${l.url ? `<a href="${l.url}">${l.address}</a>` : l.address}</td>
+            <td class="num">${formatMoney(l.price)}</td>
+            <td class="num">${m2(l.land_size_m2)}</td>
+            <td class="num">${l.lots_possible}</td>
+            <td class="num">${l.profit >= 0 ? "+" : "−"}${formatMoney(Math.abs(l.profit))}</td>
+          </tr>`).join("")}
+      </tbody></table>
+      <p class="note">Other subdivision-candidate blocks this tool has identified in ${listing.suburb}, ${listing.state} under the global Assumptions panel's cost inputs (not this listing's own edited figures above) — not a record of subdivisions that have actually been completed there, this pipeline has no source for that, but evidence the same large-vs-small land value gap recurs in this suburb.</p>`
+    : `<p class="note">No other subdivision-candidate blocks currently identified in ${listing.suburb}, ${listing.state}.</p>`;
+
+  const aiHtml = listing.ai_summary && listing.ai_summary.length
+    ? `<h2>AI subdivision notes</h2><ul>${listing.ai_summary.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul><p class="note">Generated from this listing's own description — may contain errors, not a substitute for reading the full ad.</p>`
+    : "";
+
+  const marginPct = eco.totalCost ? Math.round((eco.profit / eco.totalCost) * 1000) / 10 : null;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Subdivision Feasibility Study — ${listing.address}</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #1c1b29; max-width: 860px; margin: 40px auto; padding: 0 24px 60px; line-height: 1.5; }
+  h1 { font-size: 22px; margin-bottom: 2px; }
+  h2 { font-size: 15px; margin-top: 32px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-top: 0; }
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  table.tbl th, table.tbl td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; }
+  table.tbl td.num, table.tbl th.num { text-align: right; }
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; font-size: 13px; margin-top: 8px; }
+  .kv div { display: flex; justify-content: space-between; border-bottom: 1px dotted #eee; padding: 3px 0; }
+  .kv span:first-child { color: #666; }
+  .total-row td { font-weight: 700; border-top: 2px solid #333; }
+  .profit-positive { color: #1a7f37; font-weight: 700; }
+  .profit-negative { color: #c0392b; font-weight: 700; }
+  .note { color: #888; font-size: 12px; }
+  @media print { body { margin: 0; padding: 16px; } }
+</style>
+</head>
+<body>
+  <h1>Subdivision Feasibility Study</h1>
+  <p class="subtitle">${listing.address}, ${listing.suburb} ${listing.state} ${listing.postcode ?? ""} — generated ${generatedAt}</p>
+
+  <h2>Overview</h2>
+  <div class="kv">
+    <div><span>Purchase price</span><span>${formatMoney(listing.price)}</span></div>
+    <div><span>Land size</span><span>${m2(listing.land_size_m2)}</span></div>
+    <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
+    <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
+    <div><span>Lots possible</span><span>${listing.lots_possible}</span></div>
+    <div><span>Resulting lot size</span><span>${m2(listing.resulting_lot_m2)}</span></div>
+  </div>
+
+  <h2>Key land features</h2>
+  <div class="kv">
+    <div><span>Sewer connected</span><span>${listing.sewer_connected === true ? "Yes" : listing.sewer_connected === false ? "No" : "Unknown"}</span></div>
+    <div><span>Water connected</span><span>Not tracked — no published data source</span></div>
+    <div><span>Electricity connected</span><span>Not tracked — no published data source</span></div>
+    <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
+    <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
+    <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
+  </div>
+
+  ${aiHtml}
+
+  <h2>Estimated costs</h2>
+  <table class="tbl"><tbody>
+    ${costRows}
+    <tr class="total-row"><td>Total cost</td><td class="num">${formatMoney(eco.totalCost)}</td></tr>
+  </tbody></table>
+
+  <h2>Estimated revenue</h2>
+  <table class="tbl"><tbody>
+    <tr><td>Comp median price × ${listing.lots_possible} lots</td><td class="num">${formatMoney(listing.est_total_revenue)}</td></tr>
+    <tr><td>${subdivisionLineItemLabel(SUBDIVISION_SELLING_FIELD, listing)}</td><td class="num">-${formatMoney(eco.sellingCost)}</td></tr>
+    <tr class="total-row"><td>Net revenue</td><td class="num">${formatMoney(eco.netRevenue)}</td></tr>
+  </tbody></table>
+
+  <h2>Estimated profit</h2>
+  <p style="font-size:20px;">
+    <span class="${eco.profit >= 0 ? "profit-positive" : "profit-negative"}">${eco.profit >= 0 ? "+" : "−"}${formatMoney(Math.abs(eco.profit))}</span>
+    ${marginPct != null ? `<span class="note">(${marginPct}% margin on total cost)</span>` : ""}
+  </p>
+
+  <h2>Comparables — smaller lot sales</h2>
+  <p class="note">Sold vacant land in ${listing.suburb} used to estimate resale value per new lot — ${compMethodLabel(listing.comp_method) ?? `sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot`}, ${listing.comp_count} comparable${listing.comp_count === 1 ? "" : "s"}, ${confidenceLabel(listing.confidence)} confidence.</p>
+  ${compsHtml}
+
+  <h2>Other subdivision opportunities nearby</h2>
+  ${precedentsHtml}
+
+  <h2>Notes</h2>
+  <p class="note">This is an automated estimate for research purposes only, built from comparable land sales and editable cost assumptions — not a substitute for a professional feasibility study, surveyor's report, or legal/financial advice before purchasing. Land size / lots-possible / connectivity figures come from public listing, zoning and utility data which may be incomplete or out of date.</p>
+</body>
+</html>`;
+}
+
+function downloadFeasibilityReport(listing, params, eco, group) {
+  const html = buildFeasibilityReportHtml(listing, params, eco, group);
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `feasibility-report-${String(listing.listing_id || listing.address || "listing").replace(/[^a-z0-9]+/gi, "-")}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function openSuburbModal(group) {
   const overlay = document.getElementById("subdivision-modal");
   const title = document.getElementById("subdivision-modal-title");
   const body = document.getElementById("subdivision-modal-body");
 
-  title.textContent = `${group.suburb}, ${group.state} — ${group.opportunityCount} opportunit${group.opportunityCount === 1 ? "y" : "ies"}`;
+  title.textContent = `${group.suburb}, ${group.state} — ${group.candidateCount} candidate${group.candidateCount === 1 ? "" : "s"} (${group.opportunityCount} profitable)`;
   body.innerHTML = "";
 
-  group.listings.forEach((listing, i) => {
+  group.listings.forEach((listing) => {
     const card = document.createElement("div");
     card.className = "listing-card";
     card.innerHTML = `
@@ -949,7 +1270,7 @@ function openSuburbModal(group, params) {
           <a class="listing-card__view-link" href="${listing.url}" target="_blank" rel="noopener">View listing ↗</a>
         </div>
         <div class="listing-card__profit">
-          <span class="profit-positive">+${formatMoney(listing.profit)}</span>
+          <span class="listing-card__profit-value">${profitBadge(listing.profit)}</span>
           <span class="confidence-badge confidence-${confidenceLabel(listing.confidence).toLowerCase()}">${confidenceLabel(listing.confidence)}</span>
         </div>
       </div>
@@ -957,6 +1278,7 @@ function openSuburbModal(group, params) {
     `;
     const detail = card.querySelector(".listing-card__detail");
     const summary = card.querySelector(".listing-card__summary");
+    const profitValueEl = card.querySelector(".listing-card__profit-value");
     // Clicking the card expands/collapses the deep-dive detail — it should
     // NOT also whisk the user off to the REA listing. The "View listing"
     // link (its own explicit, separate action) opens REA instead;
@@ -964,12 +1286,21 @@ function openSuburbModal(group, params) {
     // underneath it.
     const viewLink = card.querySelector(".listing-card__view-link");
     viewLink.addEventListener("click", (e) => e.stopPropagation());
+    let built = false;
     summary.addEventListener("click", () => {
       const isOpen = !detail.hidden;
       if (isOpen) {
         detail.hidden = true;
       } else {
-        detail.innerHTML = renderListingDetail(listing, params);
+        // Built once and cached, not rebuilt on every expand — so a
+        // listing's edited assumptions survive collapsing the card and
+        // reopening it later in the same modal session.
+        if (!built) {
+          detail.appendChild(buildListingDetailElement(listing, group, (profit) => {
+            profitValueEl.innerHTML = profitBadge(profit);
+          }));
+          built = true;
+        }
         detail.hidden = false;
       }
     });
@@ -1010,27 +1341,106 @@ function buildSubdivisionFieldCatalog(listings) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Assumptions panel — the cost/margin inputs no listing can capture (real-
-// world subdivision economics, not derivable from data). Cost per lot and
-// stamp duty are the user's own originally-specified figures; selling costs
-// and holding costs are added on top (both affect profit directly, same as
-// the other two) — defaults for all four come from config.yaml's
-// subdivision: block, the two new ones seeded from the "Quick Feasibility
-// Analysis" spreadsheet (see references/subdivision/context.md).
+// world subdivision economics, not derivable from data). 2026-08: replaced
+// the old single flat "cost per lot" with real line items (land surveyor,
+// planning/council fees, per-service connections, an extend-services
+// contingency), same idea as before — these are still real-world costs no
+// listing captures, just broken down to be more reflective of what a
+// subdivision actually costs. Every field here is ALSO editable per listing
+// (see buildListingDetailElement/SUBDIVISION_OTHER_COSTS_FIELD) — this panel
+// only sets the shared defaults used for the suburb table and for any
+// listing that hasn't been individually overridden. Defaults come from
+// config.yaml's subdivision: block; percentages are seeded from the "Quick
+// Feasibility Analysis" spreadsheet (see references/subdivision/context.md).
 // ─────────────────────────────────────────────────────────────────────────────
 const SUBDIVISION_ASSUMPTION_FIELDS = [
-  { key: "costPerLot", defaultField: "default_cost_per_lot", fallback: 40000,
-    label: "Subdivision cost per lot ($)", step: 1000,
-    help: "Cost to service each new lot (water/power/gas/sewerage, surveying, compliance) — Charles's own worked example uses $40,000." },
-  { key: "stampDutyBufferPct", defaultField: "default_stamp_duty_buffer_pct", fallback: 5.5,
+  { key: "surveyorCost", defaultField: "default_surveyor_cost", fallback: 6000, group: "Fixed fees",
+    label: "Land surveyor ($, whole subdivision)", step: 500,
+    help: "One survey / plan-of-subdivision job regardless of how many lots come out of it — not per lot." },
+  { key: "planningCost", defaultField: "default_planning_cost", fallback: 8000, group: "Fixed fees",
+    label: "Planning & council fees ($, whole subdivision)", step: 500,
+    help: "Subdivision/planning application and certificate fees charged by the council — a flat cost for the whole block, not per lot." },
+  { key: "waterConnectionCostPerLot", defaultField: "default_water_connection_cost_per_lot", fallback: 3000, group: "Services (per new lot)",
+    label: "Water connection ($/lot)", step: 250,
+    help: "No connectivity data source for water anywhere in this pipeline, so this is always applied at the flat rate — override it per listing if you know a block is already serviced." },
+  { key: "powerConnectionCostPerLot", defaultField: "default_power_connection_cost_per_lot", fallback: 3500, group: "Services (per new lot)",
+    label: "Electricity connection ($/lot)", step: 250,
+    help: "Same caveat as water — no connectivity data source, so always applied at the flat rate unless overridden per listing." },
+  { key: "gasConnectionCostPerLot", defaultField: "default_gas_connection_cost_per_lot", fallback: 1500, group: "Services (per new lot)",
+    label: "Gas connection ($/lot)", step: 250,
+    help: "Set to $0 per listing for a block that won't be gas-connected at all." },
+  { key: "sewerConnectionCostPerLot", defaultField: "default_sewer_connection_cost_per_lot", fallback: 3000, group: "Services (per new lot)",
+    label: "Sewer connection ($/lot, if already connected)", step: 250,
+    help: "Applied per new lot when a block IS sewer-connected — WA/TAS listings have real data for this (see Sewer Connected in the listing detail). See Extend services below for the cost when it isn't." },
+  { key: "extendServicesCost", defaultField: "default_extend_services_cost", fallback: 25000, group: "Services (per new lot)",
+    label: "Extend services to boundary ($, if not connected)", step: 1000,
+    help: "Applied automatically instead of the per-lot sewer cost above whenever a listing's own Sewer Connected is No or Unknown — a mains extension, not just a branch. Editable per listing since outside WA/TAS this is a judgement call, not measured data." },
+  { key: "stampDutyBufferPct", defaultField: "default_stamp_duty_buffer_pct", fallback: 5.5, group: "Purchase & holding",
     label: "Stamp duty (%)", step: 0.1,
     help: "Applied to the purchase price. Varies by state and land value — 5.5% is a reasonable buffer across most states." },
-  { key: "sellingCostsPct", defaultField: "default_selling_costs_pct", fallback: 2.5,
-    label: "Selling costs (%)", step: 0.1,
-    help: "Agent commission and marketing when the new lots are resold — applied to total resale revenue." },
-  { key: "holdingCostsPct", defaultField: "default_holding_costs_pct", fallback: 5.0,
+  { key: "holdingCostsPct", defaultField: "default_holding_costs_pct", fallback: 5.0, group: "Purchase & holding",
     label: "Holding costs (%)", step: 0.1,
     help: "Interest/finance costs over the subdivision period — applied to the purchase price, same as the \"Quick Feasibility Analysis\" spreadsheet's ~5% over 12 months." },
+  { key: "sellingCostsPct", defaultField: "default_selling_costs_pct", fallback: 2.5, group: "Resale",
+    label: "Selling costs (%)", step: 0.1,
+    help: "Agent commission and marketing when the new lots are resold — applied to total resale revenue." },
 ];
+
+// Per-listing-only line item — no suburb-wide default, always starts at $0.
+// Kept separate from SUBDIVISION_ASSUMPTION_FIELDS since by definition it's
+// whatever a specific block needs that the standard line items above don't
+// cover (demolition, tree removal, easements, ...) — there's no sensible
+// shared default for that, unlike every other line item above.
+const SUBDIVISION_OTHER_COSTS_FIELD = {
+  key: "otherCosts", fallback: 0, group: "Other",
+  label: "Other costs ($, this listing only)", step: 500,
+  help: "Anything specific to this block the line items above don't capture — demolition, tree removal, easements, whatever. Defaults to $0.",
+};
+
+// Cost-side line items in listing-detail display order (everything that
+// adds to Total cost) — every SUBDIVISION_ASSUMPTION_FIELDS entry except
+// selling costs, which is a REVENUE-side deduction (agent commission on the
+// resale, not a cost of creating the lots) and is rendered separately in
+// the revenue section instead. Plus the per-listing-only Other Costs line.
+const SUBDIVISION_COST_FIELDS = SUBDIVISION_ASSUMPTION_FIELDS
+  .filter((f) => f.key !== "sellingCostsPct")
+  .concat([SUBDIVISION_OTHER_COSTS_FIELD]);
+const SUBDIVISION_SELLING_FIELD = SUBDIVISION_ASSUMPTION_FIELDS.find((f) => f.key === "sellingCostsPct");
+
+// Per-new-lot fields get their line-item label suffixed with the actual
+// lot count, and percentage fields get their base spelled out — same
+// information the old static "Stamp duty (5.5%)" labels showed, just
+// computed against whatever's currently in the (now editable) input rather
+// than baked into the label text.
+const SUBDIVISION_PER_LOT_KEYS = new Set([
+  "waterConnectionCostPerLot", "powerConnectionCostPerLot", "gasConnectionCostPerLot", "sewerConnectionCostPerLot",
+]);
+function subdivisionLineItemLabel(field, listing) {
+  if (SUBDIVISION_PER_LOT_KEYS.has(field.key)) return `${field.label} × ${listing.lots_possible} lots`;
+  if (field.key === "stampDutyBufferPct" || field.key === "holdingCostsPct") return `${field.label} of purchase price`;
+  if (field.key === "sellingCostsPct") return `${field.label} of resale revenue`;
+  return field.label;
+}
+
+// The dollar contribution of one line item, read off an already-computed
+// computeSubdivisionEconomics() result rather than recalculated here, so
+// this always matches the actual total cost/profit shown alongside it.
+function subdivisionLineItemAmount(key, eco) {
+  switch (key) {
+    case "surveyorCost": return eco.surveyorCost;
+    case "planningCost": return eco.planningCost;
+    case "waterConnectionCostPerLot": return eco.waterCost;
+    case "powerConnectionCostPerLot": return eco.powerCost;
+    case "gasConnectionCostPerLot": return eco.gasCost;
+    case "sewerConnectionCostPerLot": return eco.sewerCost;
+    case "extendServicesCost": return eco.extendServicesCost;
+    case "stampDutyBufferPct": return eco.stampDuty;
+    case "holdingCostsPct": return eco.holdingCost;
+    case "sellingCostsPct": return eco.sellingCost;
+    case "otherCosts": return eco.otherCosts;
+    default: return 0;
+  }
+}
 
 function buildSubdivisionAssumptionsPanel(defaults, refresh) {
   const body = document.getElementById("subdivision-assumptions-body");
@@ -1040,7 +1450,16 @@ function buildSubdivisionAssumptionsPanel(defaults, refresh) {
   grid.className = "assumptions-grid";
 
   const inputs = {};
+  let lastGroup = null;
   SUBDIVISION_ASSUMPTION_FIELDS.forEach((f) => {
+    if (f.group !== lastGroup) {
+      lastGroup = f.group;
+      const groupLabel = document.createElement("p");
+      groupLabel.className = "assumptions-group-label";
+      groupLabel.textContent = f.group;
+      grid.appendChild(groupLabel);
+    }
+
     const field = document.createElement("div");
     field.className = "assumptions-field";
 
@@ -1134,13 +1553,13 @@ function buildSubdivisionTab(payload) {
     columns: buildGroupedSubdivisionColumns(SUBDIVISION_COLUMNS),
     layout: "fitDataFill",
     columnDefaults: { headerWordWrap: true, minWidth: 110 },
-    height: "calc(100vh - 400px)",
+    height: "calc(100vh - 260px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
     paginationSizeSelector: [25, 50, 100, 250, 500],
     initialSort: [{ column: "opportunityScore", dir: "desc" }],
-    placeholder: "No profitable subdivision opportunities match these filters",
+    placeholder: "No subdivision candidates match these filters",
   });
 
   document.getElementById("subdivision-pagesize-top").appendChild(createPageSizeSelect(table, 50));
@@ -1166,7 +1585,7 @@ function buildSubdivisionTab(payload) {
       defaultHidden: SUBDIVISION_COLUMNS.map((c) => c.field).filter((f) => !SUBDIVISION_DEFAULT_VISIBLE.has(f)),
     });
   });
-  table.on("rowClick", (e, row) => openSuburbModal(row.getData(), subdivisionParams));
+  table.on("rowClick", (e, row) => openSuburbModal(row.getData()));
   table.on("dataFiltered", () => updateRowCount(table, "subdivision-row-count", "suburbs"));
   table.on("renderComplete", () => updateRowCount(table, "subdivision-row-count", "suburbs"));
 
@@ -2288,7 +2707,7 @@ function buildSuburbFinderTab(payload) {
     columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbColumnsCfg)],
     layout: "fitDataFill",
     columnDefaults: { headerWordWrap: true, minWidth: 110 },
-    height: "calc(100vh - 440px)",
+    height: "calc(100vh - 260px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,
@@ -2349,7 +2768,7 @@ function buildSuburbFinderTab(payload) {
     columns: [buildSelectionColumn(), ...buildGroupedSuburbColumns(suburbColumnsCfg)],
     layout: "fitDataFill",
     columnDefaults: { headerWordWrap: true, minWidth: 110 },
-    height: "calc(100vh - 440px)",
+    height: "calc(100vh - 260px)",
     pagination: true,
     paginationMode: "local",
     paginationSize: 50,

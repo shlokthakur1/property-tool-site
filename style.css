@@ -492,6 +492,19 @@ a:hover {
   color: var(--text-muted);
 }
 
+.assumptions-group-label {
+  margin: 8px 0 -6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.assumptions-group-label:first-child {
+  margin-top: 0;
+}
+
 .assumptions-actions {
   margin-top: 18px;
   display: flex;
@@ -506,6 +519,7 @@ a:hover {
 
 .profit-negative {
   color: var(--danger);
+  font-weight: 600;
 }
 
 /* Confidence badge (comp-count-backed) */
@@ -751,6 +765,46 @@ a:hover {
 
 .listing-detail__zoning > div > span:first-child {
   color: var(--text-faint);
+}
+
+.listing-detail__hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+  text-transform: none;
+}
+
+/* One editable cost/revenue line (land surveyor, service connections,
+   stamp duty %, other costs, ...) — the label stays plain text, the value
+   side holds a small live-editable input plus the dollar amount it
+   currently works out to. */
+.listing-detail__calc-row > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.listing-detail__calc-input {
+  width: 84px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 12.5px;
+  font-family: var(--font-family);
+  color: var(--text);
+  text-align: right;
+}
+
+.listing-detail__calc-amount {
+  min-width: 90px;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.listing-detail__actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .listing-detail__ai-summary {
