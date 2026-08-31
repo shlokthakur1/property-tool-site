@@ -133,7 +133,7 @@ function buildColumnDef(col) {
     ) {
       return { ...base, sorter: "number", hozAlign: "right" };
     }
-    if (col.field === "sewer_connected") {
+    if (col.field === "sewer_connected" || col.field === "water_connected" || col.field === "electricity_connected") {
       return {
         ...base,
         hozAlign: "center",
@@ -579,7 +579,15 @@ const subdivisionListingOverrides = new Map();
 
 function getListingParams(listing) {
   const override = subdivisionListingOverrides.get(listing.listing_id);
-  return { ...subdivisionParams, otherCosts: SUBDIVISION_OTHER_COSTS_FIELD.fallback, ...override };
+  // compMedianPrice's per-listing "default" is that listing's own
+  // comp-backed estimate (comp_median_price), not a shared constant like
+  // every other field here — there's nothing suburb-wide to seed it from.
+  return {
+    ...subdivisionParams,
+    otherCosts: SUBDIVISION_OTHER_COSTS_FIELD.fallback,
+    compMedianPrice: listing.comp_median_price,
+    ...override,
+  };
 }
 
 function setListingParamOverride(listing, key, value) {
@@ -595,17 +603,24 @@ function setListingParamOverride(listing, key, value) {
 // are flat one-off costs for the whole subdivision (the paperwork doesn't
 // multiply per lot); water/power/gas/sewer connections are per NEW lot
 // (each needs its own service connection); extendServicesCost is a flat
-// contingency applied only when the block ISN'T already sewer-connected —
-// the one service this pipeline has real connectivity data for
-// (sewer_connected, WA/TAS only — see enrich_sewer.py). Water/electricity
-// connectivity has no equivalent data source anywhere in this pipeline, so
-// their per-lot costs are always applied at the flat rate rather than
-// guessed at being "already connected" — see the Land & zoning section of
-// the listing detail, which says so explicitly rather than fabricating a
-// Yes/No. `otherCosts` only ever comes from a per-listing override
+// contingency applied only when the block ISN'T already sewer-connected.
+// Sewer is still the only one of the three "does this block already have
+// it" signals this cost-zeroing logic actually reacts to — water_connected
+// (WA/TAS, see enrich_water.py) and electricity_connected (TAS only, see
+// enrich_electricity.py) are now real, tracked fields (shown in the Land &
+// zoning section below) but deliberately don't change any cost line here
+// yet; extending the same connected-vs-not treatment to them is a natural
+// follow-up, not done in this pass. `otherCosts` only ever comes from a
+// per-listing override
 // (params.otherCosts defaults to 0 via ?? below) — there's no global
 // default for it, since by definition it's whatever this specific block
-// needs that the standard line items don't cover.
+// needs that the standard line items don't cover. `compMedianPrice` is
+// likewise never a global default — it's this listing's own comp-backed
+// per-lot resale estimate (params.compMedianPrice, seeded from
+// listing.comp_median_price by getListingParams) unless the user overrides
+// it with their own view of what one lot would actually sell for (2026-08,
+// user-requested — "let the user choose what the price per lot would be if
+// it was sold").
 function computeSubdivisionEconomics(listing, params) {
   const lots = listing.lots_possible;
   const sewerConnected = listing.sewer_connected === true;
@@ -619,13 +634,16 @@ function computeSubdivisionEconomics(listing, params) {
   const holdingCost = listing.price * (params.holdingCostsPct / 100);
   const otherCosts = params.otherCosts ?? 0;
   const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost + otherCosts;
-  const sellingCost = listing.est_total_revenue * (params.sellingCostsPct / 100);
-  const netRevenue = listing.est_total_revenue - sellingCost;
+  const compMedianPrice = params.compMedianPrice ?? listing.comp_median_price;
+  const estTotalRevenue = compMedianPrice * lots;
+  const sellingCost = estTotalRevenue * (params.sellingCostsPct / 100);
+  const netRevenue = estTotalRevenue - sellingCost;
   const profit = netRevenue - totalCost;
   return {
     lots, sewerConnected, waterCost, powerCost, gasCost, sewerCost, extendServicesCost,
     surveyorCost: params.surveyorCost, planningCost: params.planningCost,
-    subdivisionCost, stampDuty, holdingCost, otherCosts, totalCost, sellingCost, netRevenue, profit,
+    subdivisionCost, stampDuty, holdingCost, otherCosts, totalCost,
+    compMedianPrice, estTotalRevenue, sellingCost, netRevenue, profit,
   };
 }
 
@@ -649,6 +667,17 @@ function confidenceLabel(confidence) {
   if (confidence >= 0.9) return "High";
   if (confidence >= 0.5) return "Medium";
   return "Low";
+}
+
+// Shared Yes/No/Unknown rendering for the three connectivity booleans
+// (sewer_connected WA/TAS, water_connected WA/TAS, electricity_connected
+// TAS-only — see enrich_sewer.py/enrich_water.py/enrich_electricity.py).
+// null/undefined means "state not covered or lookup hasn't run yet", never
+// "not connected" — always rendered as "Unknown", not a blank or a "No".
+function connectivityLabel(value) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return "Unknown";
 }
 
 // Fraction of `sortedValues` at or below `value` — the same rank(pct=True)
@@ -750,6 +779,10 @@ function buildSuburbGroups(listings, params, qb) {
       // WA/TAS only (see enrich_sewer.py) — same "best opportunity's own
       // figure" convention as the fields above.
       bestSewerConnected: best.sewer_connected,
+      // WA/TAS only (see enrich_water.py) — same convention.
+      bestWaterConnected: best.water_connected,
+      // TAS only (see enrich_electricity.py) — same convention.
+      bestElectricityConnected: best.electricity_connected,
       listings: items,
     });
   }
@@ -834,6 +867,10 @@ const SUBDIVISION_COLUMNS = [
     description: "Heritage significance (Local/State/National/World), where the best opportunity's block is heritage-listed — NSW only for now. Blank means not listed, not \"unknown\"." },
   { field: "bestSewerConnected", title: "Best Opportunity — Sewer Connected", group: "Best Opportunity Detail",
     description: "True if a real, constructed sewer connection was found within 100m of the best opportunity's block (Water Corporation WA / TasWater's own public spatial data — see enrich_sewer.py) — WA and TAS only for now. Informational context only — it plays no part in the lots_possible calc (see Avg Lot Size (Council) above). Blank means the state isn't covered or the lookup hasn't run yet, not \"not connected\"." },
+  { field: "bestWaterConnected", title: "Best Opportunity — Water Connected", group: "Best Opportunity Detail",
+    description: "True if a real water connection/meter was found within 100m of the best opportunity's block (Water Corporation WA / TasWater's own public spatial data — see enrich_water.py) — WA and TAS only for now. Informational only, same as Sewer Connected." },
+  { field: "bestElectricityConnected", title: "Best Opportunity — Electricity Connected", group: "Best Opportunity Detail",
+    description: "True if real low-voltage electricity reticulation was found within 100m of the best opportunity's block (TasNetworks' own public spatial data — see enrich_electricity.py) — TAS only for now (see that file's docstring for why WA isn't covered). Informational only, same as Sewer/Water Connected." },
 ];
 
 const SUBDIVISION_DEFAULT_VISIBLE = new Set([
@@ -884,7 +921,7 @@ function buildSubdivisionColumnDef(col) {
       return v == null ? "" : `${v} m`;
     } };
   }
-  if (col.field === "bestSewerConnected") {
+  if (col.field === "bestSewerConnected" || col.field === "bestWaterConnected" || col.field === "bestElectricityConnected") {
     return { ...base, hozAlign: "center", formatter: (cell) => {
       const v = cell.getValue();
       if (v === true) return "Yes";
@@ -993,8 +1030,9 @@ function buildListingDetailElement(listing, group, onProfitChange) {
       <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
       <div><span>Typical lot size (this zone, informational)</span><span>${m2(listing.typical_lot_m2)}</span></div>
       <div><span>Avg lot size (council — used for this calc)</span><span>${m2(listing.avg_lot_m2)}</span></div>
-      <div><span>Sewer connected</span><span>${listing.sewer_connected === true ? "Yes" : listing.sewer_connected === false ? "No" : "Unknown"}</span></div>
-      <div><span>Water / electricity connected</span><span>Not tracked — no published connectivity data source for these two services (unlike sewer), always costed as a new connection below</span></div>
+      <div><span>Sewer connected</span><span>${connectivityLabel(listing.sewer_connected)}</span></div>
+      <div><span>Water connected</span><span>${connectivityLabel(listing.water_connected)}</span></div>
+      <div><span>Electricity connected</span><span>${connectivityLabel(listing.electricity_connected)}</span></div>
       <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
       <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
       <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
@@ -1051,10 +1089,7 @@ function buildListingDetailElement(listing, group, onProfitChange) {
   calc.appendChild(totalCostRow);
   const totalCostAmount = totalCostRow.querySelector("span:last-child");
 
-  const revenueRow = document.createElement("div");
-  revenueRow.innerHTML = `<span>Comp median price × ${listing.lots_possible} lots</span><span>${formatMoney(listing.est_total_revenue)}</span>`;
-  calc.appendChild(revenueRow);
-
+  const compPriceAmount = addEditableRow(SUBDIVISION_COMP_PRICE_FIELD);
   const sellingAmount = addEditableRow(SUBDIVISION_SELLING_FIELD);
 
   const netRevenueRow = document.createElement("div");
@@ -1079,6 +1114,7 @@ function buildListingDetailElement(listing, group, onProfitChange) {
       const note = key === "extendServicesCost" && eco.sewerConnected ? " (not applied — already sewer-connected)" : "";
       el.textContent = `${formatMoney(value)}${note}`;
     });
+    compPriceAmount.textContent = formatMoney(eco.estTotalRevenue);
     sellingAmount.textContent = `-${formatMoney(eco.sellingCost)}`;
     totalCostAmount.textContent = formatMoney(eco.totalCost);
     netRevenueAmount.textContent = formatMoney(eco.netRevenue);
@@ -1195,9 +1231,9 @@ function buildFeasibilityReportHtml(listing, params, eco, group) {
 
   <h2>Key land features</h2>
   <div class="kv">
-    <div><span>Sewer connected</span><span>${listing.sewer_connected === true ? "Yes" : listing.sewer_connected === false ? "No" : "Unknown"}</span></div>
-    <div><span>Water connected</span><span>Not tracked — no published data source</span></div>
-    <div><span>Electricity connected</span><span>Not tracked — no published data source</span></div>
+    <div><span>Sewer connected</span><span>${connectivityLabel(listing.sewer_connected)}</span></div>
+    <div><span>Water connected</span><span>${connectivityLabel(listing.water_connected)}</span></div>
+    <div><span>Electricity connected</span><span>${connectivityLabel(listing.electricity_connected)}</span></div>
     <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
     <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
     <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
@@ -1213,10 +1249,11 @@ function buildFeasibilityReportHtml(listing, params, eco, group) {
 
   <h2>Estimated revenue</h2>
   <table class="tbl"><tbody>
-    <tr><td>Comp median price × ${listing.lots_possible} lots</td><td class="num">${formatMoney(listing.est_total_revenue)}</td></tr>
+    <tr><td>${subdivisionLineItemLabel(SUBDIVISION_COMP_PRICE_FIELD, listing)}</td><td class="num">${formatMoney(eco.estTotalRevenue)}</td></tr>
     <tr><td>${subdivisionLineItemLabel(SUBDIVISION_SELLING_FIELD, listing)}</td><td class="num">-${formatMoney(eco.sellingCost)}</td></tr>
     <tr class="total-row"><td>Net revenue</td><td class="num">${formatMoney(eco.netRevenue)}</td></tr>
   </tbody></table>
+  ${eco.compMedianPrice !== listing.comp_median_price ? `<p class="note">Comp median price overridden to ${formatMoney(eco.compMedianPrice)}/lot — the comp-backed estimate below is ${formatMoney(listing.comp_median_price)}/lot.</p>` : ""}
 
   <h2>Estimated profit</h2>
   <p style="font-size:20px;">
@@ -1335,6 +1372,10 @@ function buildSubdivisionFieldCatalog(listings) {
     // field here, e.g. zone/state) rather than "Yes"/"No" labels; use
     // "Equals" → true to show only sewer-connected land.
     { field: "sewer_connected", label: "Sewer Connected", type: "categorical" },
+    // WA/TAS only (see enrich_water.py) — same convention as sewer_connected.
+    { field: "water_connected", label: "Water Connected", type: "categorical" },
+    // TAS only (see enrich_electricity.py) — same convention.
+    { field: "electricity_connected", label: "Electricity Connected", type: "categorical" },
   ];
   return fields.map((f) => (f.type === "categorical" ? { ...f, options: distinctValues(listings, f.field) } : f));
 }
@@ -1362,10 +1403,10 @@ const SUBDIVISION_ASSUMPTION_FIELDS = [
     help: "Subdivision/planning application and certificate fees charged by the council — a flat cost for the whole block, not per lot." },
   { key: "waterConnectionCostPerLot", defaultField: "default_water_connection_cost_per_lot", fallback: 3000, group: "Services (per new lot)",
     label: "Water connection ($/lot)", step: 250,
-    help: "No connectivity data source for water anywhere in this pipeline, so this is always applied at the flat rate — override it per listing if you know a block is already serviced." },
+    help: "Always applied at the flat rate regardless of this listing's own Water Connected value (WA/TAS, see enrich_water.py) — that field is shown for context in Land & zoning below but doesn't reduce this cost yet. Override it per listing if you know a block is already serviced." },
   { key: "powerConnectionCostPerLot", defaultField: "default_power_connection_cost_per_lot", fallback: 3500, group: "Services (per new lot)",
     label: "Electricity connection ($/lot)", step: 250,
-    help: "Same caveat as water — no connectivity data source, so always applied at the flat rate unless overridden per listing." },
+    help: "Same caveat as water — always applied at the flat rate regardless of this listing's own Electricity Connected value (TAS only, see enrich_electricity.py) unless overridden per listing." },
   { key: "gasConnectionCostPerLot", defaultField: "default_gas_connection_cost_per_lot", fallback: 1500, group: "Services (per new lot)",
     label: "Gas connection ($/lot)", step: 250,
     help: "Set to $0 per listing for a block that won't be gas-connected at all." },
@@ -1407,6 +1448,19 @@ const SUBDIVISION_COST_FIELDS = SUBDIVISION_ASSUMPTION_FIELDS
   .concat([SUBDIVISION_OTHER_COSTS_FIELD]);
 const SUBDIVISION_SELLING_FIELD = SUBDIVISION_ASSUMPTION_FIELDS.find((f) => f.key === "sellingCostsPct");
 
+// Revenue-side line item — like Other Costs, per-listing only with no
+// suburb-wide default (see getListingParams: it's seeded from THIS
+// listing's own comp_median_price, not a shared constant). 2026-08,
+// user-requested: "let the user choose what the price per lot would be if
+// it was sold" — the comp-backed estimate is a starting point, not the
+// final word, especially for a rate-estimated (non-size-matched) comp
+// method (see compMethodLabel) where it's less reliable to begin with.
+const SUBDIVISION_COMP_PRICE_FIELD = {
+  key: "compMedianPrice", fallback: 0, group: "Revenue",
+  label: "Comp median price ($/lot, if sold)", step: 1000,
+  help: "Estimated resale value per new lot, seeded from the comparable sold vacant-land price below — override it with your own view of what one lot would actually sell for.",
+};
+
 // Per-new-lot fields get their line-item label suffixed with the actual
 // lot count, and percentage fields get their base spelled out — same
 // information the old static "Stamp duty (5.5%)" labels showed, just
@@ -1414,6 +1468,7 @@ const SUBDIVISION_SELLING_FIELD = SUBDIVISION_ASSUMPTION_FIELDS.find((f) => f.ke
 // than baked into the label text.
 const SUBDIVISION_PER_LOT_KEYS = new Set([
   "waterConnectionCostPerLot", "powerConnectionCostPerLot", "gasConnectionCostPerLot", "sewerConnectionCostPerLot",
+  "compMedianPrice",
 ]);
 function subdivisionLineItemLabel(field, listing) {
   if (SUBDIVISION_PER_LOT_KEYS.has(field.key)) return `${field.label} × ${listing.lots_possible} lots`;
@@ -1438,6 +1493,7 @@ function subdivisionLineItemAmount(key, eco) {
     case "holdingCostsPct": return eco.holdingCost;
     case "sellingCostsPct": return eco.sellingCost;
     case "otherCosts": return eco.otherCosts;
+    case "compMedianPrice": return eco.estTotalRevenue;
     default: return 0;
   }
 }
