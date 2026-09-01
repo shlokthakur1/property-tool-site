@@ -579,13 +579,15 @@ const subdivisionListingOverrides = new Map();
 
 function getListingParams(listing) {
   const override = subdivisionListingOverrides.get(listing.listing_id);
-  // compMedianPrice's per-listing "default" is that listing's own
-  // comp-backed estimate (comp_median_price), not a shared constant like
-  // every other field here — there's nothing suburb-wide to seed it from.
+  // compMedianPrice's and purchasePrice's per-listing "defaults" are that
+  // listing's own figures (comp_median_price / price), not a shared
+  // constant like every other field here — there's nothing suburb-wide to
+  // seed either from.
   return {
     ...subdivisionParams,
     otherCosts: SUBDIVISION_OTHER_COSTS_FIELD.fallback,
     compMedianPrice: listing.comp_median_price,
+    purchasePrice: listing.price,
     ...override,
   };
 }
@@ -620,27 +622,30 @@ function setListingParamOverride(listing, key, value) {
 // listing.comp_median_price by getListingParams) unless the user overrides
 // it with their own view of what one lot would actually sell for (2026-08,
 // user-requested — "let the user choose what the price per lot would be if
-// it was sold").
+// it was sold"). `purchasePrice` is the same pattern again — seeded from
+// listing.price, overridable per listing (2026-09, user-requested) e.g. to
+// model a negotiated offer below asking rather than the listed price.
 function computeSubdivisionEconomics(listing, params) {
   const lots = listing.lots_possible;
   const sewerConnected = listing.sewer_connected === true;
+  const purchasePrice = params.purchasePrice ?? listing.price;
   const waterCost = params.waterConnectionCostPerLot * lots;
   const powerCost = params.powerConnectionCostPerLot * lots;
   const gasCost = params.gasConnectionCostPerLot * lots;
   const sewerCost = params.sewerConnectionCostPerLot * lots;
   const extendServicesCost = sewerConnected ? 0 : params.extendServicesCost;
   const subdivisionCost = params.surveyorCost + params.planningCost + waterCost + powerCost + gasCost + sewerCost + extendServicesCost;
-  const stampDuty = listing.price * (params.stampDutyBufferPct / 100);
-  const holdingCost = listing.price * (params.holdingCostsPct / 100);
+  const stampDuty = purchasePrice * (params.stampDutyBufferPct / 100);
+  const holdingCost = purchasePrice * (params.holdingCostsPct / 100);
   const otherCosts = params.otherCosts ?? 0;
-  const totalCost = listing.price + subdivisionCost + stampDuty + holdingCost + otherCosts;
+  const totalCost = purchasePrice + subdivisionCost + stampDuty + holdingCost + otherCosts;
   const compMedianPrice = params.compMedianPrice ?? listing.comp_median_price;
   const estTotalRevenue = compMedianPrice * lots;
   const sellingCost = estTotalRevenue * (params.sellingCostsPct / 100);
   const netRevenue = estTotalRevenue - sellingCost;
   const profit = netRevenue - totalCost;
   return {
-    lots, sewerConnected, waterCost, powerCost, gasCost, sewerCost, extendServicesCost,
+    lots, sewerConnected, purchasePrice, waterCost, powerCost, gasCost, sewerCost, extendServicesCost,
     surveyorCost: params.surveyorCost, planningCost: params.planningCost,
     subdivisionCost, stampDuty, holdingCost, otherCosts, totalCost,
     compMedianPrice, estTotalRevenue, sellingCost, netRevenue, profit,
@@ -1049,10 +1054,6 @@ function buildListingDetailElement(listing, group, onProfitChange) {
 
   const calc = wrap.querySelector(".listing-detail__calc");
 
-  const purchaseRow = document.createElement("div");
-  purchaseRow.innerHTML = `<span>Purchase price</span><span>${formatMoney(listing.price)}</span>`;
-  calc.appendChild(purchaseRow);
-
   function addEditableRow(field) {
     const row = document.createElement("div");
     row.className = "listing-detail__calc-row";
@@ -1081,6 +1082,7 @@ function buildListingDetailElement(listing, group, onProfitChange) {
   }
 
   const costAmounts = {};
+  costAmounts.purchasePrice = addEditableRow(SUBDIVISION_PURCHASE_PRICE_FIELD);
   SUBDIVISION_COST_FIELDS.forEach((f) => { costAmounts[f.key] = addEditableRow(f); });
 
   const totalCostRow = document.createElement("div");
@@ -1152,7 +1154,7 @@ function buildFeasibilityReportHtml(listing, params, eco, group) {
   const generatedAt = new Date().toLocaleString("en-AU");
   const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
 
-  const costRows = SUBDIVISION_COST_FIELDS.map((f) => {
+  const costRows = [SUBDIVISION_PURCHASE_PRICE_FIELD, ...SUBDIVISION_COST_FIELDS].map((f) => {
     const value = subdivisionLineItemAmount(f.key, eco);
     const note = f.key === "extendServicesCost" && eco.sewerConnected ? " (not applied — already sewer-connected)" : "";
     return `<tr><td>${subdivisionLineItemLabel(f, listing)}</td><td class="num">${formatMoney(value)}${note}</td></tr>`;
@@ -1221,13 +1223,14 @@ function buildFeasibilityReportHtml(listing, params, eco, group) {
 
   <h2>Overview</h2>
   <div class="kv">
-    <div><span>Purchase price</span><span>${formatMoney(listing.price)}</span></div>
+    <div><span>Purchase price</span><span>${formatMoney(eco.purchasePrice)}</span></div>
     <div><span>Land size</span><span>${m2(listing.land_size_m2)}</span></div>
     <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
     <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
     <div><span>Lots possible</span><span>${listing.lots_possible}</span></div>
     <div><span>Resulting lot size</span><span>${m2(listing.resulting_lot_m2)}</span></div>
   </div>
+  ${eco.purchasePrice !== listing.price ? `<p class="note">Purchase price overridden to ${formatMoney(eco.purchasePrice)} — this listing's own asking price is ${formatMoney(listing.price)}.</p>` : ""}
 
   <h2>Key land features</h2>
   <div class="kv">
@@ -1461,6 +1464,19 @@ const SUBDIVISION_COMP_PRICE_FIELD = {
   help: "Estimated resale value per new lot, seeded from the comparable sold vacant-land price below — override it with your own view of what one lot would actually sell for.",
 };
 
+// Cost-side line item, same per-listing-only pattern as Other Costs and
+// Comp Median Price above — seeded from THIS listing's own asking price
+// (getListingParams), not a shared constant. 2026-09, user-requested: lets
+// a negotiated offer below (or above) asking price flow through the whole
+// calc, not just the flat costs — stamp duty and holding costs are a % OF
+// this figure, so overriding it moves those too, not just the purchase
+// price line itself.
+const SUBDIVISION_PURCHASE_PRICE_FIELD = {
+  key: "purchasePrice", fallback: 0, group: "Purchase & holding",
+  label: "Purchase price ($)", step: 1000,
+  help: "Seeded from this listing's own asking price — override it to model a negotiated offer. Stamp duty and holding costs below are a % of whatever's here, so they'll update too.",
+};
+
 // Per-new-lot fields get their line-item label suffixed with the actual
 // lot count, and percentage fields get their base spelled out — same
 // information the old static "Stamp duty (5.5%)" labels showed, just
@@ -1494,6 +1510,7 @@ function subdivisionLineItemAmount(key, eco) {
     case "sellingCostsPct": return eco.sellingCost;
     case "otherCosts": return eco.otherCosts;
     case "compMedianPrice": return eco.estTotalRevenue;
+    case "purchasePrice": return eco.purchasePrice;
     default: return 0;
   }
 }
