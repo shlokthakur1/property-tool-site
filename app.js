@@ -777,9 +777,8 @@ function buildSuburbGroups(listings, params, qb) {
       bestZone: best.zone,
       // Other council rules — NSW-only for now (see build_site.py), shown
       // for the single best opportunity's own block, same convention as
-      // bestZone above.
-      bestHeightLimit: best.height_limit_m,
-      bestFloorSpaceRatio: best.floor_space_ratio,
+      // bestZone above. (Height limit / floor space ratio dropped from the
+      // Subdivision tab 2026-09, user-requested — low value, NSW-only.)
       bestHeritageSignificance: best.heritage_significance,
       // WA/TAS only (see enrich_sewer.py) — same "best opportunity's own
       // figure" convention as the fields above.
@@ -864,10 +863,6 @@ const SUBDIVISION_COLUMNS = [
     description: "The real, published average site-area-per-dwelling figure actually used to work out how many new lots the best opportunity's own block can be split into (see build_site.py's council_avg_lot_size) — currently WA only, sourced from R-Codes Table D via enrich_zoning.py, no fallback to the zone's bare legal minimum or to Typical Lot Size (Zone). A block whose zone has no real published average is excluded from consideration entirely rather than sized against an invented or proxy figure — for now this means only WA opportunities can appear here." },
   { field: "bestTypicalLotSizeM2", title: "Best Opportunity — Typical Lot Size (Zone)", group: "Best Opportunity Detail",
     description: "The ordinary/typical House lot size (median, at least subdivision.min_comparables House listings required) for the SAME suburb-and-zone combination as the best opportunity's own block — an informational sense-check only, showing \"what does a normal lot look like in this zone\". Grouped by zone, not just suburb, so a suburb spanning several zones doesn't get one blended figure (see typical_house_lot_size_by_suburb). Plays no part in the lots_possible calc (see Avg Lot Size (Council) above) and is distinct from Median Land Size (For Sale), which is the size of the (unusually large, by definition) subdivision-candidate blocks themselves, not ordinary lots generally." },
-  { field: "bestHeightLimit", title: "Best Opportunity — Height Limit (m)", group: "Best Opportunity Detail",
-    description: "Maximum building height permitted on the best opportunity's block, in metres — NSW only for now (no equivalent published layer for other states, see config.yaml's zoning: block)." },
-  { field: "bestFloorSpaceRatio", title: "Best Opportunity — Floor Space Ratio", group: "Best Opportunity Detail",
-    description: "Maximum floor space ratio permitted on the best opportunity's block — NSW only for now." },
   { field: "bestHeritageSignificance", title: "Best Opportunity — Heritage Listing", group: "Best Opportunity Detail",
     description: "Heritage significance (Local/State/National/World), where the best opportunity's block is heritage-listed — NSW only for now. Blank means not listed, not \"unknown\"." },
   { field: "bestSewerConnected", title: "Best Opportunity — Sewer Connected", group: "Best Opportunity Detail",
@@ -920,24 +915,12 @@ function buildSubdivisionColumnDef(col) {
       return v == null ? "" : `${Math.round(v).toLocaleString()} m²`;
     } };
   }
-  if (col.field === "bestHeightLimit") {
-    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
-      const v = cell.getValue();
-      return v == null ? "" : `${v} m`;
-    } };
-  }
   if (col.field === "bestSewerConnected" || col.field === "bestWaterConnected" || col.field === "bestElectricityConnected") {
     return { ...base, hozAlign: "center", formatter: (cell) => {
       const v = cell.getValue();
       if (v === true) return "Yes";
       if (v === false) return "No";
       return "";
-    } };
-  }
-  if (col.field === "bestFloorSpaceRatio") {
-    return { ...base, sorter: "number", hozAlign: "right", formatter: (cell) => {
-      const v = cell.getValue();
-      return v == null ? "" : `${v}:1`;
     } };
   }
   return { ...base, sorter: "string" };
@@ -1005,6 +988,50 @@ function compMethodLabel(method) {
   }
 }
 
+// Generic editable "label — input — computed amount" row, shared by any
+// per-listing line-item calculator that needs every value to be a live
+// <input> (rebuilding via innerHTML on each keystroke would drop focus/
+// cursor position mid-edit) — originally inlined in buildListingDetailElement
+// as `addEditableRow`, factored out 2026-09 so Suburb Finder's Profitability
+// calculator (see buildProfitabilityCalc) can reuse the exact same DOM/CSS
+// pattern instead of re-inventing it. Appends the row to `container` and
+// returns the <span> its computed amount gets written into on recompute.
+function createEditableCalcRow(container, { label, step, value, onInput }) {
+  const row = document.createElement("div");
+  row.className = "listing-detail__calc-row";
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+  const valueWrap = document.createElement("span");
+  valueWrap.className = "listing-detail__calc-value";
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = String(step);
+  input.className = "listing-detail__calc-input";
+  input.value = value;
+  const amount = document.createElement("span");
+  amount.className = "listing-detail__calc-amount";
+  valueWrap.appendChild(input);
+  valueWrap.appendChild(amount);
+  row.appendChild(labelEl);
+  row.appendChild(valueWrap);
+  container.appendChild(row);
+  input.addEventListener("input", () => {
+    const v = Number(input.value);
+    onInput(Number.isFinite(v) ? v : 0);
+  });
+  return amount;
+}
+
+// A bold "label — computed amount" row with no input, for running totals
+// (Total cost, Net revenue, Estimated profit, ...) — same shared pattern.
+function createCalcTotalRow(container, label) {
+  const row = document.createElement("div");
+  row.className = "listing-detail__total";
+  row.innerHTML = `<span>${label}</span><span></span>`;
+  container.appendChild(row);
+  return row.querySelector("span:last-child");
+}
+
 // Builds the expandable per-listing deep-dive as real DOM (not an innerHTML
 // string, unlike most of this file) — the whole point is that every cost
 // line is a live <input>, and rebuilding via innerHTML on each keystroke
@@ -1038,8 +1065,6 @@ function buildListingDetailElement(listing, group, onProfitChange) {
       <div><span>Sewer connected</span><span>${connectivityLabel(listing.sewer_connected)}</span></div>
       <div><span>Water connected</span><span>${connectivityLabel(listing.water_connected)}</span></div>
       <div><span>Electricity connected</span><span>${connectivityLabel(listing.electricity_connected)}</span></div>
-      <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
-      <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
       <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
     </div>
     ${aiSummaryHtml}
@@ -1055,56 +1080,28 @@ function buildListingDetailElement(listing, group, onProfitChange) {
   const calc = wrap.querySelector(".listing-detail__calc");
 
   function addEditableRow(field) {
-    const row = document.createElement("div");
-    row.className = "listing-detail__calc-row";
-    const label = document.createElement("span");
-    label.textContent = subdivisionLineItemLabel(field, listing);
-    const valueWrap = document.createElement("span");
-    valueWrap.className = "listing-detail__calc-value";
-    const input = document.createElement("input");
-    input.type = "number";
-    input.step = String(field.step);
-    input.className = "listing-detail__calc-input";
-    input.value = getListingParams(listing)[field.key] ?? field.fallback;
-    const amount = document.createElement("span");
-    amount.className = "listing-detail__calc-amount";
-    valueWrap.appendChild(input);
-    valueWrap.appendChild(amount);
-    row.appendChild(label);
-    row.appendChild(valueWrap);
-    calc.appendChild(row);
-    input.addEventListener("input", () => {
-      const v = Number(input.value);
-      setListingParamOverride(listing, field.key, Number.isFinite(v) ? v : 0);
-      recompute();
+    return createEditableCalcRow(calc, {
+      label: subdivisionLineItemLabel(field, listing),
+      step: field.step,
+      value: getListingParams(listing)[field.key] ?? field.fallback,
+      onInput: (v) => {
+        setListingParamOverride(listing, field.key, v);
+        recompute();
+      },
     });
-    return amount;
   }
 
   const costAmounts = {};
   costAmounts.purchasePrice = addEditableRow(SUBDIVISION_PURCHASE_PRICE_FIELD);
   SUBDIVISION_COST_FIELDS.forEach((f) => { costAmounts[f.key] = addEditableRow(f); });
 
-  const totalCostRow = document.createElement("div");
-  totalCostRow.className = "listing-detail__total";
-  totalCostRow.innerHTML = "<span>Total cost</span><span></span>";
-  calc.appendChild(totalCostRow);
-  const totalCostAmount = totalCostRow.querySelector("span:last-child");
+  const totalCostAmount = createCalcTotalRow(calc, "Total cost");
 
   const compPriceAmount = addEditableRow(SUBDIVISION_COMP_PRICE_FIELD);
   const sellingAmount = addEditableRow(SUBDIVISION_SELLING_FIELD);
 
-  const netRevenueRow = document.createElement("div");
-  netRevenueRow.className = "listing-detail__total";
-  netRevenueRow.innerHTML = "<span>Net revenue</span><span></span>";
-  calc.appendChild(netRevenueRow);
-  const netRevenueAmount = netRevenueRow.querySelector("span:last-child");
-
-  const profitRow = document.createElement("div");
-  profitRow.className = "listing-detail__total";
-  profitRow.innerHTML = "<span>Estimated profit</span><span></span>";
-  calc.appendChild(profitRow);
-  const profitAmount = profitRow.querySelector("span:last-child");
+  const netRevenueAmount = createCalcTotalRow(calc, "Net revenue");
+  const profitAmount = createCalcTotalRow(calc, "Estimated profit");
 
   let lastEco = null;
   function recompute() {
@@ -1140,154 +1137,226 @@ function buildListingDetailElement(listing, group, onProfitChange) {
 }
 
 // Standalone feasibility-study document for one listing (2026-08,
-// user-requested) — a real .html file, self-contained (inline CSS, no
-// external assets) so it opens and prints cleanly outside the site, built
-// from whatever the user has currently edited in the listing detail panel
-// (params/eco), not the raw defaults. "Comparables — smaller lot sales" is
-// the same comps this listing's own resale estimate is based on; "Other
-// subdivision opportunities nearby" is every OTHER subdivision-candidate
-// block this tool has found in the same suburb — evidence the arbitrage
-// pattern recurs here, not a record of subdivisions that have actually
-// been completed (this pipeline has no data source for that, and the
-// report says so rather than implying otherwise).
-function buildFeasibilityReportHtml(listing, params, eco, group) {
+// user-requested; converted 2026-09 to a real .pdf via jsPDF + jspdf-
+// autotable — CDN-loaded in index.html, same pattern as Tabulator —
+// instead of a downloadable .html file), built from whatever the user has
+// currently edited in the listing detail panel (params/eco), not the raw
+// defaults. "Comparables — smaller lot sales" is the same comps this
+// listing's own resale estimate is based on; "Other subdivision
+// opportunities nearby" is every OTHER subdivision-candidate block this
+// tool has found in the same suburb — evidence the arbitrage pattern
+// recurs here, not a record of subdivisions that have actually been
+// completed (this pipeline has no data source for that, and the report
+// says so rather than implying otherwise). Height limit / floor space
+// ratio dropped 2026-09 (user-requested, low value, NSW-only) — Council
+// (now backed by a nationwide lookup, see enrich_council.py) kept.
+function buildFeasibilityReportPdf(listing, params, eco, group) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  const contentWidth = pageWidth - margin * 2;
   const generatedAt = new Date().toLocaleString("en-AU");
   const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
+  // jsPDF's built-in fonts use WinAnsi encoding, which has no glyph for the
+  // real minus sign (−, U+2212) the on-screen UI uses elsewhere — a plain
+  // hyphen reads identically in print and avoids a missing-glyph box.
+  const sign = (v) => (v >= 0 ? "+" : "-");
+  let y = margin;
 
+  function ensureSpace(minHeight) {
+    if (y + minHeight > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  }
+
+  function heading(text) {
+    ensureSpace(40);
+    y += 18;
+    doc.setFont(undefined, "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 27, 41);
+    doc.text(text, margin, y);
+    y += 6;
+    doc.setDrawColor(220);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 14;
+    doc.setFont(undefined, "normal");
+  }
+
+  function note(text) {
+    doc.setFontSize(8.5);
+    doc.setTextColor(136);
+    const lines = doc.splitTextToSize(text, contentWidth);
+    ensureSpace(lines.length * 10 + 4);
+    doc.text(lines, margin, y);
+    y += lines.length * 10 + 8;
+    doc.setTextColor(30, 27, 41);
+  }
+
+  function kvTable(pairs) {
+    doc.autoTable({
+      startY: y,
+      margin: { left: margin, right: margin },
+      theme: "plain",
+      styles: { fontSize: 9, cellPadding: 2 },
+      columnStyles: { 0: { textColor: "#666666", cellWidth: contentWidth * 0.4 } },
+      body: pairs,
+    });
+    y = doc.lastAutoTable.finalY + 10;
+  }
+
+  function dataTable(head, body, opts = {}) {
+    doc.autoTable({
+      startY: y,
+      margin: { left: margin, right: margin },
+      theme: "grid",
+      headStyles: { fillColor: [240, 240, 245], textColor: [30, 27, 41], fontSize: 9 },
+      styles: { fontSize: 8.5, cellPadding: 4 },
+      head: [head],
+      body,
+      ...opts,
+    });
+    y = doc.lastAutoTable.finalY + 10;
+  }
+
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(18);
+  doc.text("Subdivision Feasibility Study", margin, y + 6);
+  y += 22;
+  doc.setFont(undefined, "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(102);
+  doc.text(`${listing.address}, ${listing.suburb} ${listing.state} ${listing.postcode ?? ""} — generated ${generatedAt}`, margin, y);
+  doc.setTextColor(30, 27, 41);
+  y += 20;
+
+  heading("Overview");
+  kvTable([
+    ["Purchase price", formatMoney(eco.purchasePrice)],
+    ["Land size", m2(listing.land_size_m2)],
+    ["Zone", listing.zone ?? "—"],
+    ["Council", listing.council ?? "—"],
+    ["Lots possible", String(listing.lots_possible)],
+    ["Resulting lot size", m2(listing.resulting_lot_m2)],
+  ]);
+  if (eco.purchasePrice !== listing.price) {
+    note(`Purchase price overridden to ${formatMoney(eco.purchasePrice)} — this listing's own asking price is ${formatMoney(listing.price)}.`);
+  }
+
+  heading("Key land features");
+  kvTable([
+    ["Sewer connected", connectivityLabel(listing.sewer_connected)],
+    ["Water connected", connectivityLabel(listing.water_connected)],
+    ["Electricity connected", connectivityLabel(listing.electricity_connected)],
+    ["Heritage listing", listing.heritage_significance ?? "Not listed"],
+  ]);
+
+  if (listing.ai_summary && listing.ai_summary.length) {
+    heading("AI subdivision notes");
+    doc.setFontSize(9);
+    listing.ai_summary.forEach((point) => {
+      const lines = doc.splitTextToSize(`•  ${point}`, contentWidth);
+      ensureSpace(lines.length * 11);
+      doc.text(lines, margin, y);
+      y += lines.length * 11 + 2;
+    });
+    y += 4;
+    note("Generated from this listing's own description — may contain errors, not a substitute for reading the full ad.");
+  }
+
+  heading("Estimated costs");
   const costRows = [SUBDIVISION_PURCHASE_PRICE_FIELD, ...SUBDIVISION_COST_FIELDS].map((f) => {
     const value = subdivisionLineItemAmount(f.key, eco);
-    const note = f.key === "extendServicesCost" && eco.sewerConnected ? " (not applied — already sewer-connected)" : "";
-    return `<tr><td>${subdivisionLineItemLabel(f, listing)}</td><td class="num">${formatMoney(value)}${note}</td></tr>`;
-  }).join("");
+    const noteText = f.key === "extendServicesCost" && eco.sewerConnected ? " (not applied — already sewer-connected)" : "";
+    return [subdivisionLineItemLabel(f, listing), `${formatMoney(value)}${noteText}`];
+  });
+  const totalCostRowIndex = costRows.length;
+  costRows.push(["Total cost", formatMoney(eco.totalCost)]);
+  dataTable(["Item", "Amount"], costRows, {
+    columnStyles: { 1: { halign: "right" } },
+    didParseCell: (data) => {
+      if (data.section === "body" && data.row.index === totalCostRowIndex) data.cell.styles.fontStyle = "bold";
+    },
+  });
 
-  const compsHtml = listing.comps && listing.comps.length
-    ? `<table class="tbl"><thead><tr><th>Address</th><th>Land</th><th>Sold price</th><th>Price/m²</th><th>Sold date</th></tr></thead><tbody>
-        ${listing.comps.map((c) => `
-          <tr>
-            <td>${c.url ? `<a href="${c.url}">${c.address ?? "—"}</a>` : (c.address ?? "—")}</td>
-            <td class="num">${m2(c.land_size_m2)}</td>
-            <td class="num">${formatMoney(c.price)}</td>
-            <td class="num">${c.price_per_m2 != null ? `$${Math.round(c.price_per_m2).toLocaleString()}/m²` : "—"}</td>
-            <td>${c.sold_date ?? "—"}</td>
-          </tr>`).join("")}
-      </tbody></table>`
-    : `<p class="note">No comparable sale details available.</p>`;
+  heading("Estimated revenue");
+  dataTable(["Item", "Amount"], [
+    [subdivisionLineItemLabel(SUBDIVISION_COMP_PRICE_FIELD, listing), formatMoney(eco.estTotalRevenue)],
+    [subdivisionLineItemLabel(SUBDIVISION_SELLING_FIELD, listing), `-${formatMoney(eco.sellingCost)}`],
+    ["Net revenue", formatMoney(eco.netRevenue)],
+  ], {
+    columnStyles: { 1: { halign: "right" } },
+    didParseCell: (data) => {
+      if (data.section === "body" && data.row.index === 2) data.cell.styles.fontStyle = "bold";
+    },
+  });
+  if (eco.compMedianPrice !== listing.comp_median_price) {
+    note(`Comp median price overridden to ${formatMoney(eco.compMedianPrice)}/lot — the comp-backed estimate below is ${formatMoney(listing.comp_median_price)}/lot.`);
+  }
 
-  const otherListings = (group?.listings || []).filter((l) => l.listing_id !== listing.listing_id);
-  const precedentsHtml = otherListings.length
-    ? `<table class="tbl"><thead><tr><th>Address</th><th>Price</th><th>Land</th><th>Lots possible</th><th>Est. profit (current assumptions)</th></tr></thead><tbody>
-        ${otherListings.map((l) => `
-          <tr>
-            <td>${l.url ? `<a href="${l.url}">${l.address}</a>` : l.address}</td>
-            <td class="num">${formatMoney(l.price)}</td>
-            <td class="num">${m2(l.land_size_m2)}</td>
-            <td class="num">${l.lots_possible}</td>
-            <td class="num">${l.profit >= 0 ? "+" : "−"}${formatMoney(Math.abs(l.profit))}</td>
-          </tr>`).join("")}
-      </tbody></table>
-      <p class="note">Other subdivision-candidate blocks this tool has identified in ${listing.suburb}, ${listing.state} under the global Assumptions panel's cost inputs (not this listing's own edited figures above) — not a record of subdivisions that have actually been completed there, this pipeline has no source for that, but evidence the same large-vs-small land value gap recurs in this suburb.</p>`
-    : `<p class="note">No other subdivision-candidate blocks currently identified in ${listing.suburb}, ${listing.state}.</p>`;
-
-  const aiHtml = listing.ai_summary && listing.ai_summary.length
-    ? `<h2>AI subdivision notes</h2><ul>${listing.ai_summary.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul><p class="note">Generated from this listing's own description — may contain errors, not a substitute for reading the full ad.</p>`
-    : "";
-
+  heading("Estimated profit");
   const marginPct = eco.totalCost ? Math.round((eco.profit / eco.totalCost) * 1000) / 10 : null;
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(16);
+  if (eco.profit >= 0) doc.setTextColor(26, 127, 55);
+  else doc.setTextColor(192, 57, 43);
+  doc.text(`${sign(eco.profit)}${formatMoney(Math.abs(eco.profit))}`, margin, y + 14);
+  doc.setTextColor(30, 27, 41);
+  doc.setFont(undefined, "normal");
+  y += 30;
+  if (marginPct != null) {
+    doc.setFontSize(9);
+    doc.setTextColor(136);
+    doc.text(`(${marginPct}% margin on total cost)`, margin, y);
+    doc.setTextColor(30, 27, 41);
+    y += 16;
+  }
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<title>Subdivision Feasibility Study — ${listing.address}</title>
-<style>
-  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #1c1b29; max-width: 860px; margin: 40px auto; padding: 0 24px 60px; line-height: 1.5; }
-  h1 { font-size: 22px; margin-bottom: 2px; }
-  h2 { font-size: 15px; margin-top: 32px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-  .subtitle { color: #666; font-size: 13px; margin-top: 0; }
-  table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-  table.tbl th, table.tbl td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; }
-  table.tbl td.num, table.tbl th.num { text-align: right; }
-  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; font-size: 13px; margin-top: 8px; }
-  .kv div { display: flex; justify-content: space-between; border-bottom: 1px dotted #eee; padding: 3px 0; }
-  .kv span:first-child { color: #666; }
-  .total-row td { font-weight: 700; border-top: 2px solid #333; }
-  .profit-positive { color: #1a7f37; font-weight: 700; }
-  .profit-negative { color: #c0392b; font-weight: 700; }
-  .note { color: #888; font-size: 12px; }
-  @media print { body { margin: 0; padding: 16px; } }
-</style>
-</head>
-<body>
-  <h1>Subdivision Feasibility Study</h1>
-  <p class="subtitle">${listing.address}, ${listing.suburb} ${listing.state} ${listing.postcode ?? ""} — generated ${generatedAt}</p>
+  heading("Comparables — smaller lot sales");
+  note(`Sold vacant land in ${listing.suburb} used to estimate resale value per new lot — ${compMethodLabel(listing.comp_method) ?? `sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot`}, ${listing.comp_count} comparable${listing.comp_count === 1 ? "" : "s"}, ${confidenceLabel(listing.confidence)} confidence.`);
+  if (listing.comps && listing.comps.length) {
+    dataTable(
+      ["Address", "Land", "Sold price", "Price/m²", "Sold date"],
+      listing.comps.map((c) => [
+        c.address ?? "—", m2(c.land_size_m2), formatMoney(c.price),
+        c.price_per_m2 != null ? `$${Math.round(c.price_per_m2).toLocaleString()}/m²` : "—",
+        c.sold_date ?? "—",
+      ]),
+      { columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } } },
+    );
+  } else {
+    note("No comparable sale details available.");
+  }
 
-  <h2>Overview</h2>
-  <div class="kv">
-    <div><span>Purchase price</span><span>${formatMoney(eco.purchasePrice)}</span></div>
-    <div><span>Land size</span><span>${m2(listing.land_size_m2)}</span></div>
-    <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
-    <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
-    <div><span>Lots possible</span><span>${listing.lots_possible}</span></div>
-    <div><span>Resulting lot size</span><span>${m2(listing.resulting_lot_m2)}</span></div>
-  </div>
-  ${eco.purchasePrice !== listing.price ? `<p class="note">Purchase price overridden to ${formatMoney(eco.purchasePrice)} — this listing's own asking price is ${formatMoney(listing.price)}.</p>` : ""}
+  heading("Other subdivision opportunities nearby");
+  const otherListings = (group?.listings || []).filter((l) => l.listing_id !== listing.listing_id);
+  if (otherListings.length) {
+    dataTable(
+      ["Address", "Price", "Land", "Lots possible", "Est. profit (current assumptions)"],
+      otherListings.map((l) => [
+        l.address, formatMoney(l.price), m2(l.land_size_m2), String(l.lots_possible),
+        `${sign(l.profit)}${formatMoney(Math.abs(l.profit))}`,
+      ]),
+      { columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } } },
+    );
+    note(`Other subdivision-candidate blocks this tool has identified in ${listing.suburb}, ${listing.state} under the global Assumptions panel's cost inputs (not this listing's own edited figures above) — not a record of subdivisions that have actually been completed there, this pipeline has no source for that, but evidence the same large-vs-small land value gap recurs in this suburb.`);
+  } else {
+    note(`No other subdivision-candidate blocks currently identified in ${listing.suburb}, ${listing.state}.`);
+  }
 
-  <h2>Key land features</h2>
-  <div class="kv">
-    <div><span>Sewer connected</span><span>${connectivityLabel(listing.sewer_connected)}</span></div>
-    <div><span>Water connected</span><span>${connectivityLabel(listing.water_connected)}</span></div>
-    <div><span>Electricity connected</span><span>${connectivityLabel(listing.electricity_connected)}</span></div>
-    <div><span>Height limit</span><span>${listing.height_limit_m != null ? `${listing.height_limit_m} m` : "—"}</span></div>
-    <div><span>Floor space ratio</span><span>${listing.floor_space_ratio != null ? `${listing.floor_space_ratio}:1` : "—"}</span></div>
-    <div><span>Heritage listing</span><span>${listing.heritage_significance ?? "Not listed"}</span></div>
-  </div>
+  heading("Notes");
+  note("This is an automated estimate for research purposes only, built from comparable land sales and editable cost assumptions — not a substitute for a professional feasibility study, surveyor's report, or legal/financial advice before purchasing. Land size / lots-possible / connectivity figures come from public listing, zoning and utility data which may be incomplete or out of date.");
 
-  ${aiHtml}
-
-  <h2>Estimated costs</h2>
-  <table class="tbl"><tbody>
-    ${costRows}
-    <tr class="total-row"><td>Total cost</td><td class="num">${formatMoney(eco.totalCost)}</td></tr>
-  </tbody></table>
-
-  <h2>Estimated revenue</h2>
-  <table class="tbl"><tbody>
-    <tr><td>${subdivisionLineItemLabel(SUBDIVISION_COMP_PRICE_FIELD, listing)}</td><td class="num">${formatMoney(eco.estTotalRevenue)}</td></tr>
-    <tr><td>${subdivisionLineItemLabel(SUBDIVISION_SELLING_FIELD, listing)}</td><td class="num">-${formatMoney(eco.sellingCost)}</td></tr>
-    <tr class="total-row"><td>Net revenue</td><td class="num">${formatMoney(eco.netRevenue)}</td></tr>
-  </tbody></table>
-  ${eco.compMedianPrice !== listing.comp_median_price ? `<p class="note">Comp median price overridden to ${formatMoney(eco.compMedianPrice)}/lot — the comp-backed estimate below is ${formatMoney(listing.comp_median_price)}/lot.</p>` : ""}
-
-  <h2>Estimated profit</h2>
-  <p style="font-size:20px;">
-    <span class="${eco.profit >= 0 ? "profit-positive" : "profit-negative"}">${eco.profit >= 0 ? "+" : "−"}${formatMoney(Math.abs(eco.profit))}</span>
-    ${marginPct != null ? `<span class="note">(${marginPct}% margin on total cost)</span>` : ""}
-  </p>
-
-  <h2>Comparables — smaller lot sales</h2>
-  <p class="note">Sold vacant land in ${listing.suburb} used to estimate resale value per new lot — ${compMethodLabel(listing.comp_method) ?? `sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot`}, ${listing.comp_count} comparable${listing.comp_count === 1 ? "" : "s"}, ${confidenceLabel(listing.confidence)} confidence.</p>
-  ${compsHtml}
-
-  <h2>Other subdivision opportunities nearby</h2>
-  ${precedentsHtml}
-
-  <h2>Notes</h2>
-  <p class="note">This is an automated estimate for research purposes only, built from comparable land sales and editable cost assumptions — not a substitute for a professional feasibility study, surveyor's report, or legal/financial advice before purchasing. Land size / lots-possible / connectivity figures come from public listing, zoning and utility data which may be incomplete or out of date.</p>
-</body>
-</html>`;
+  return doc;
 }
 
 function downloadFeasibilityReport(listing, params, eco, group) {
-  const html = buildFeasibilityReportHtml(listing, params, eco, group);
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `feasibility-report-${String(listing.listing_id || listing.address || "listing").replace(/[^a-z0-9]+/gi, "-")}.html`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const doc = buildFeasibilityReportPdf(listing, params, eco, group);
+  const filename = `feasibility-report-${String(listing.listing_id || listing.address || "listing").replace(/[^a-z0-9]+/gi, "-")}.pdf`;
+  doc.save(filename);
 }
 
 function openSuburbModal(group) {
@@ -2733,6 +2802,206 @@ function wireSaveShortlistButton(button, getActiveKeys) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Suburb Finder → Live Listings → per-listing "Profitability" calculator
+// (2026-09, user-requested) — a standalone buy/sell cost simulation for ANY
+// live listing, distinct from the Subdivision tab's own economics (that one
+// only ever applies to subdivision-candidate blocks). Same "field
+// descriptor + editable row + in-memory per-listing override Map" shape as
+// the Subdivision tab's SUBDIVISION_COST_FIELDS/getListingParams (see
+// createEditableCalcRow/createCalcTotalRow above), kept as its own
+// independent set rather than folding into that one — the two domains
+// don't share any line items or a computeSubdivisionEconomics-shaped calc.
+// ─────────────────────────────────────────────────────────────────────────────
+const PROFITABILITY_ACQUISITION_FIELDS = [
+  { key: "stampDutyPct", label: "Stamp duty (%, of purchase price)", step: 0.1, fallback: 5.0 },
+  { key: "conveyancingBuyCost", label: "Conveyancing costs ($, buy side)", step: 100, fallback: 1500 },
+  { key: "lmiCost", label: "LMI — Lenders Mortgage Insurance ($)", step: 500, fallback: 0 },
+  { key: "buildingPestCost", label: "Building & pest inspection ($)", step: 50, fallback: 500 },
+];
+
+const PROFITABILITY_DISPOSAL_FIELDS = [
+  { key: "agentCommissionPct", label: "Agent commission (%, of selling price)", step: 0.1, fallback: 2.0 },
+  { key: "conveyancingSellCost", label: "Conveyancer costs ($, sell side)", step: 100, fallback: 1500 },
+];
+
+// Session-only per-listing overrides, same convention as
+// subdivisionListingOverrides above — keyed by listing.listing_id, only
+// ever holding the keys a user has actually changed for that one listing.
+const profitabilityListingOverrides = new Map();
+
+function getProfitabilityParams(listing) {
+  const defaults = { purchasePrice: listing.price ?? 0, estSellingPrice: listing.price ?? 0, targetProfit: 0 };
+  [...PROFITABILITY_ACQUISITION_FIELDS, ...PROFITABILITY_DISPOSAL_FIELDS].forEach((f) => { defaults[f.key] = f.fallback; });
+  return { ...defaults, ...profitabilityListingOverrides.get(listing.listing_id) };
+}
+
+function setProfitabilityParamOverride(listing, key, value) {
+  const existing = profitabilityListingOverrides.get(listing.listing_id) || {};
+  profitabilityListingOverrides.set(listing.listing_id, { ...existing, [key]: value });
+}
+
+// Pure calc, same shape as computeSubdivisionEconomics — purchase-side costs
+// (stamp duty, conveyancing, LMI, building & pest) against the purchase
+// price give the total acquisition cost; sale-side costs (agent commission,
+// conveyancer) against the estimated selling price give net sale proceeds;
+// profit is the difference. requiredSalePrice solves the same relationship
+// in reverse for a chosen target profit — the "how much would I need to
+// sell it for" simulation the user asked for: sellingPrice *
+// (1 - commissionPct/100) - conveyancingSellCost = totalAcquisitionCost +
+// targetProfit, rearranged for sellingPrice.
+function computeProfitability(params) {
+  const purchasePrice = params.purchasePrice ?? 0;
+  const stampDuty = purchasePrice * (params.stampDutyPct / 100);
+  const totalAcquisitionCost = purchasePrice + stampDuty + params.conveyancingBuyCost + params.lmiCost + params.buildingPestCost;
+
+  const estSellingPrice = params.estSellingPrice ?? 0;
+  const agentCommission = estSellingPrice * (params.agentCommissionPct / 100);
+  const netSaleProceeds = estSellingPrice - agentCommission - params.conveyancingSellCost;
+
+  const profit = netSaleProceeds - totalAcquisitionCost;
+
+  const commissionFraction = params.agentCommissionPct / 100;
+  const requiredSalePrice = commissionFraction < 1
+    ? (totalAcquisitionCost + (params.targetProfit ?? 0) + params.conveyancingSellCost) / (1 - commissionFraction)
+    : null;
+
+  return {
+    purchasePrice, stampDuty, conveyancingBuyCost: params.conveyancingBuyCost, lmiCost: params.lmiCost,
+    buildingPestCost: params.buildingPestCost, totalAcquisitionCost,
+    estSellingPrice, agentCommission, conveyancingSellCost: params.conveyancingSellCost, netSaleProceeds,
+    profit, targetProfit: params.targetProfit ?? 0, requiredSalePrice,
+  };
+}
+
+function buildProfitabilityCalc(container, listing) {
+  container.innerHTML = `
+    <h4>Acquisition</h4>
+    <div class="listing-detail__calc" data-profitability-acquisition></div>
+    <h4>Disposal</h4>
+    <div class="listing-detail__calc" data-profitability-disposal></div>
+    <h4>Simulate a target profit <span class="listing-detail__hint">— enter what you're after; the required sale price updates live</span></h4>
+    <div class="listing-detail__calc" data-profitability-target></div>
+  `;
+  const acquisitionCalc = container.querySelector("[data-profitability-acquisition]");
+  const disposalCalc = container.querySelector("[data-profitability-disposal]");
+  const targetCalc = container.querySelector("[data-profitability-target]");
+
+  function editableField(calc, field) {
+    return createEditableCalcRow(calc, {
+      label: field.label,
+      step: field.step,
+      value: getProfitabilityParams(listing)[field.key],
+      onInput: (v) => {
+        setProfitabilityParamOverride(listing, field.key, v);
+        recompute();
+      },
+    });
+  }
+
+  const purchasePriceAmount = createEditableCalcRow(acquisitionCalc, {
+    label: "Purchase price ($)", step: 1000, value: getProfitabilityParams(listing).purchasePrice,
+    onInput: (v) => { setProfitabilityParamOverride(listing, "purchasePrice", v); recompute(); },
+  });
+  const acquisitionAmounts = {};
+  PROFITABILITY_ACQUISITION_FIELDS.forEach((f) => { acquisitionAmounts[f.key] = editableField(acquisitionCalc, f); });
+  const totalAcquisitionAmount = createCalcTotalRow(acquisitionCalc, "Total acquisition cost");
+
+  const sellingPriceAmount = createEditableCalcRow(disposalCalc, {
+    label: "Estimated selling price ($)", step: 1000, value: getProfitabilityParams(listing).estSellingPrice,
+    onInput: (v) => { setProfitabilityParamOverride(listing, "estSellingPrice", v); recompute(); },
+  });
+  const disposalAmounts = {};
+  PROFITABILITY_DISPOSAL_FIELDS.forEach((f) => { disposalAmounts[f.key] = editableField(disposalCalc, f); });
+  const netProceedsAmount = createCalcTotalRow(disposalCalc, "Net sale proceeds");
+  const profitAmount = createCalcTotalRow(disposalCalc, "Estimated profit");
+
+  const targetProfitAmount = createEditableCalcRow(targetCalc, {
+    label: "Target profit ($)", step: 1000, value: getProfitabilityParams(listing).targetProfit,
+    onInput: (v) => { setProfitabilityParamOverride(listing, "targetProfit", v); recompute(); },
+  });
+  const requiredSalePriceAmount = createCalcTotalRow(targetCalc, "Required sale price");
+
+  function recompute() {
+    const p = computeProfitability(getProfitabilityParams(listing));
+    purchasePriceAmount.textContent = formatMoney(p.purchasePrice);
+    acquisitionAmounts.stampDutyPct.textContent = formatMoney(p.stampDuty);
+    acquisitionAmounts.conveyancingBuyCost.textContent = formatMoney(p.conveyancingBuyCost);
+    acquisitionAmounts.lmiCost.textContent = formatMoney(p.lmiCost);
+    acquisitionAmounts.buildingPestCost.textContent = formatMoney(p.buildingPestCost);
+    totalAcquisitionAmount.textContent = formatMoney(p.totalAcquisitionCost);
+
+    sellingPriceAmount.textContent = formatMoney(p.estSellingPrice);
+    disposalAmounts.agentCommissionPct.textContent = `-${formatMoney(p.agentCommission)}`;
+    disposalAmounts.conveyancingSellCost.textContent = `-${formatMoney(p.conveyancingSellCost)}`;
+    netProceedsAmount.textContent = formatMoney(p.netSaleProceeds);
+    profitAmount.innerHTML = profitBadge(p.profit);
+
+    targetProfitAmount.textContent = formatMoney(p.targetProfit);
+    requiredSalePriceAmount.textContent = p.requiredSalePrice != null ? formatMoney(p.requiredSalePrice) : "—";
+  }
+  recompute();
+}
+
+// Opens the Live Listings detail modal for one listing — a direct link out
+// to the listing itself (same "View listing ↗" pattern as the Subdivision
+// tab's own listing cards, see openSuburbModal) plus Profitability/Cashflow
+// sub-tabs (2026-09, user-requested). Rebuilds body.innerHTML fresh on
+// every open (unlike buildListingDetailElement's own live-DOM approach) —
+// there's only ever one listing open in this modal at a time, so there's no
+// focus/cursor state from a DIFFERENT listing that a fresh rebuild could
+// clobber.
+function openLiveListingModal(listing, suburbsByKey) {
+  const overlay = document.getElementById("livelisting-modal");
+  const title = document.getElementById("livelisting-modal-title");
+  const body = document.getElementById("livelisting-modal-body");
+
+  title.textContent = `${listing.address}, ${listing.suburb} ${listing.state}${listing.postcode ? ` ${listing.postcode}` : ""}`;
+  body.innerHTML = `
+    <div class="listing-detail__zoning">
+      <div><span>Price</span><span>${formatMoney(listing.price)}</span></div>
+      <div><span>Land size</span><span>${listing.land_size_m2 != null ? `${Math.round(listing.land_size_m2).toLocaleString()} m²` : "—"}</span></div>
+      <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
+      <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
+    </div>
+    ${listing.url ? `<p><a class="listing-card__view-link" href="${listing.url}" target="_blank" rel="noopener">View listing ↗</a></p>` : ""}
+    <nav class="subtabs">
+      <button type="button" class="subtabs__btn is-active" data-livelisting-subtab="profitability">Profitability</button>
+      <button type="button" class="subtabs__btn" data-livelisting-subtab="cashflow">Cashflow</button>
+    </nav>
+    <div data-livelisting-panel="profitability" class="subtab-panel is-active"></div>
+    <div data-livelisting-panel="cashflow" class="subtab-panel"></div>
+  `;
+
+  body.querySelectorAll("[data-livelisting-subtab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      body.querySelectorAll("[data-livelisting-subtab]").forEach((b) => b.classList.remove("is-active"));
+      body.querySelectorAll(".subtab-panel").forEach((p) => p.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      body.querySelector(`[data-livelisting-panel="${btn.dataset.livelistingSubtab}"]`).classList.add("is-active");
+    });
+  });
+
+  buildProfitabilityCalc(body.querySelector('[data-livelisting-panel="profitability"]'), listing);
+
+  const suburbRow = suburbsByKey.get(suburbKey(listing));
+  const suggestedWeeklyRent = suburbRow
+    ? (listing.property_type === "Unit" ? suburbRow.median_rent_weekly_unit : suburbRow.median_rent_weekly_house)
+    : null;
+  buildListingCashflowCalc(body.querySelector('[data-livelisting-panel="cashflow"]'), listing, suggestedWeeklyRent);
+
+  overlay.hidden = false;
+}
+
+function wireLiveListingModalClose() {
+  const modal = document.getElementById("livelisting-modal");
+  const close = () => { modal.hidden = true; };
+  document.getElementById("livelisting-modal-close").addEventListener("click", close);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+}
+
 // Mirrors setupTabs, scoped to one nested .subtabs group instead of the
 // top-level .tabs bar (a Tabulator table built while its panel is still
 // display:none needs a redraw once actually shown, same reasoning as the
@@ -2764,6 +3033,7 @@ function buildSuburbFinderTab(payload) {
   if (!suburbs) return null;
 
   wireCompareModalClose();
+  wireLiveListingModalClose();
   const activeShortlist = loadActiveShortlist();
 
   // Suburb/state/postcode collapse into one "Area" column for display —
@@ -2773,6 +3043,11 @@ function buildSuburbFinderTab(payload) {
     row.area = formatArea(row.suburb, row.state, row.postcode);
   });
   const suburbColumnsCfg = mergeIdentityColumns(suburbs.columns);
+  // Live Listings' Cashflow sub-tab prefills weekly rent from this listing's
+  // OWN suburb's median rent (median_rent_weekly_house/_unit — see
+  // config.yaml's suburb_columns) where available, keyed the same way as
+  // suburbKey() elsewhere in this file.
+  const suburbsByKey = new Map(suburbs.rows.map((row) => [suburbKey(row), row]));
 
   // ── Explore suburbs ─────────────────────────────────────────────────────
   const exploreTable = new Tabulator("#suburb-table", {
@@ -2907,7 +3182,118 @@ function buildSuburbFinderTab(payload) {
   shortlistTable.on("dataFiltered", () => updateRowCount(shortlistTable, "shortlist-row-count", "suburbs"));
   shortlistTable.on("renderComplete", () => updateRowCount(shortlistTable, "shortlist-row-count", "suburbs"));
 
-  setupSubTabs(document.getElementById("tab-suburbfinder"), { explore: exploreTable, shortlist: shortlistTable });
+  // ── Live Listings (2026-09, user-requested) ─────────────────────────────
+  // Reuses the same row-per-listing dataset the Data Table tab shows
+  // (payload.rows, already filtered server-side to browsable For Sale/Sold
+  // rows — see build_payload's display_df in build_site.py), filtered
+  // client-side here to just "For Sale" plus whichever suburbs are
+  // currently active. Multiple suburbs can feed this at once, ticked in
+  // EITHER Explore suburbs or Shortlist via the same checkbox column/
+  // selectableRows mechanism already used for Compare/Add to Shortlist
+  // above (see buildSelectionColumn/wireCompareFeature) — "View Live
+  // Listings" just reads whichever rows are currently selected.
+  let activeLiveListingsSuburbs = new Set();
+  let liveListingsSearchTerm = "";
+
+  function liveListingsFilter(row) {
+    if (row.status !== "For Sale") return false;
+    if (!activeLiveListingsSuburbs.has(suburbKey(row))) return false;
+    return !liveListingsSearchTerm || String(row.address ?? "").toLowerCase().includes(liveListingsSearchTerm);
+  }
+
+  function buildLiveListingActionColumn() {
+    return {
+      title: "", field: "_liveListingActions", headerSort: false, hozAlign: "center", width: 130, minWidth: 130,
+      formatter: () => `<button type="button" class="btn btn--secondary">Profitability &amp; Cashflow</button>`,
+      cellClick: (e, cell) => {
+        e.stopPropagation();
+        openLiveListingModal(cell.getRow().getData(), suburbsByKey);
+      },
+    };
+  }
+
+  // payload.rows already carries `.area` (set once in main() before this
+  // tab is built) and the same columns config Data Table itself uses
+  // (buildGroupedColumns), so Live Listings' formatting (money, m², etc.)
+  // stays identical to Data Table for free.
+  const dataTableColumnsCfg = mergeIdentityColumns(payload.columns);
+  const liveListingsTable = new Tabulator("#livelistings-table", {
+    data: payload.rows,
+    columns: [...buildGroupedColumns(dataTableColumnsCfg), buildLiveListingActionColumn()],
+    layout: "fitDataFill",
+    columnDefaults: { headerWordWrap: true, minWidth: 110 },
+    height: "calc(100vh - 300px)",
+    pagination: true,
+    paginationMode: "local",
+    paginationSize: 50,
+    paginationSizeSelector: [25, 50, 100, 250, 500],
+    placeholder: "Select suburbs in Explore suburbs or Shortlist, then click \"View Live Listings\".",
+  });
+  liveListingsTable.setFilter(liveListingsFilter);
+
+  document.getElementById("livelistings-pagesize-top").appendChild(createPageSizeSelect(liveListingsTable, 50));
+
+  const liveListingsSearchBox = document.getElementById("livelistings-search");
+  liveListingsSearchBox.addEventListener("input", debounce(() => {
+    liveListingsSearchTerm = liveListingsSearchBox.value.trim().toLowerCase();
+    liveListingsTable.setFilter(liveListingsFilter);
+  }, 200));
+  document.getElementById("livelistings-download-xlsx").addEventListener("click", () => {
+    liveListingsTable.download("xlsx", "live-listings.xlsx", { sheetName: "Live Listings" });
+  });
+
+  liveListingsTable.on("tableBuilt", () => {
+    createColumnPanel(liveListingsTable, dataTableColumnsCfg, {
+      panel: "livelistings-column-panel", groups: "livelistings-column-panel-groups",
+      toggle: "livelistings-column-panel-toggle", close: "livelistings-column-panel-close",
+      selectAll: "livelistings-column-panel-all", selectNone: "livelistings-column-panel-none",
+      storageKey: "livelistings-hidden-columns",
+    });
+  });
+  liveListingsTable.on("dataFiltered", () => updateRowCount(liveListingsTable, "livelistings-row-count", "listings"));
+  liveListingsTable.on("renderComplete", () => updateRowCount(liveListingsTable, "livelistings-row-count", "listings"));
+
+  function renderActiveSuburbsChips() {
+    const container = document.getElementById("livelistings-active-suburbs");
+    if (activeLiveListingsSuburbs.size === 0) {
+      container.innerHTML = '<span class="livelistings-active-suburbs__empty">No suburbs selected yet — tick some in Explore suburbs or Shortlist, then "View Live Listings".</span>';
+      return;
+    }
+    const chips = [...activeLiveListingsSuburbs].map((key) => {
+      const [chipSuburb, chipState] = key.split("||");
+      return `<span class="chip">${chipSuburb}, ${chipState}</span>`;
+    }).join("");
+    container.innerHTML = `<span class="livelistings-active-suburbs__label">Active suburbs:</span>${chips}<button type="button" id="livelistings-clear-suburbs" class="btn btn--ghost">Clear</button>`;
+    document.getElementById("livelistings-clear-suburbs").addEventListener("click", () => {
+      activeLiveListingsSuburbs = new Set();
+      liveListingsTable.setFilter(liveListingsFilter);
+      renderActiveSuburbsChips();
+    });
+  }
+  renderActiveSuburbsChips();
+
+  function activateLiveListingsFor(table) {
+    activeLiveListingsSuburbs = new Set(table.getSelectedData().map(suburbKey));
+    liveListingsTable.setFilter(liveListingsFilter);
+    renderActiveSuburbsChips();
+    document.querySelector('#tab-suburbfinder [data-subtab="livelistings"]').click();
+  }
+
+  const viewLiveListingsFromExploreBtn = document.getElementById("suburbfinder-view-live-listings");
+  exploreTable.on("rowSelectionChanged", (data) => {
+    viewLiveListingsFromExploreBtn.disabled = data.length === 0;
+  });
+  viewLiveListingsFromExploreBtn.addEventListener("click", () => activateLiveListingsFor(exploreTable));
+
+  const viewLiveListingsFromShortlistBtn = document.getElementById("shortlist-view-live-listings");
+  shortlistTable.on("rowSelectionChanged", (data) => {
+    viewLiveListingsFromShortlistBtn.disabled = data.length === 0;
+  });
+  viewLiveListingsFromShortlistBtn.addEventListener("click", () => activateLiveListingsFor(shortlistTable));
+
+  setupSubTabs(document.getElementById("tab-suburbfinder"), {
+    explore: exploreTable, shortlist: shortlistTable, livelistings: liveListingsTable,
+  });
 
   return exploreTable;
 }
@@ -3162,57 +3548,6 @@ function cfMoney(value, decimals = 0) {
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 }
 
-function cfReadInputs() {
-  return {
-    price: Number(document.getElementById("cf-price").value),
-    depositPct: Number(document.getElementById("cf-deposit-pct").value),
-    interestRatePct: Number(document.getElementById("cf-interest-rate").value),
-    loanTermYears: Number(document.getElementById("cf-loan-term").value),
-    stampDutyPct: Number(document.getElementById("cf-stamp-duty-pct").value),
-    weeklyRent: Number(document.getElementById("cf-weekly-rent").value),
-    vacancyPct: Number(document.getElementById("cf-vacancy-pct").value),
-    mgmtPct: Number(document.getElementById("cf-mgmt-pct").value),
-    otherExpensesAnnual: Number(document.getElementById("cf-other-expenses").value),
-    growthPct: Number(document.getElementById("cf-growth-pct").value),
-  };
-}
-
-function cfRenderSummary(result) {
-  const container = document.getElementById("cf-summary");
-  const stat = (label, value, cls) => `
-    <div class="cashflow-stat">
-      <span class="cashflow-stat__label">${label}</span>
-      <span class="cashflow-stat__value${cls ? ` ${cls}` : ""}">${value}</span>
-    </div>
-  `;
-  const cashflowCls = result.netWeeklyCashflow >= 0 ? "is-positive" : "is-negative";
-  container.innerHTML = [
-    stat("Loan amount", cfMoney(result.loanAmount)),
-    stat("Upfront cost (deposit + stamp duty)", cfMoney(result.upfrontCosts)),
-    stat("Loan repayment /week", cfMoney(result.weeklyRepayment)),
-    stat("Gross rent /year (after vacancy)", cfMoney(result.grossAnnualRent)),
-    stat("Net cashflow /week", cfMoney(result.netWeeklyCashflow), cashflowCls),
-    stat("Net cashflow /year", cfMoney(result.netAnnualCashflow), cashflowCls),
-    stat("Cash-on-cash return", result.cashOnCashReturnPct == null ? "—" : `${result.cashOnCashReturnPct.toFixed(1)}%`),
-    stat("Equity after 10yr", cfMoney(result.projection[9].equity)),
-    stat("Equity after 30yr", cfMoney(result.projection[29].equity)),
-  ].join("");
-}
-
-function cfRenderProjection(result) {
-  const tbody = document.getElementById("cf-projection-body");
-  tbody.innerHTML = result.projection.map((row) => `
-    <tr>
-      <td>${row.year}</td>
-      <td>${cfMoney(row.propertyValue)}</td>
-      <td>${cfMoney(row.loanBalance)}</td>
-      <td>${cfMoney(row.equity)}</td>
-      <td>${cfMoney(row.annualCashflow)}</td>
-      <td>${cfMoney(row.cumulativeCashflow)}</td>
-    </tr>
-  `).join("");
-}
-
 const CF_SCENARIOS_STORAGE_KEY = "propertyTool.cashflowScenarios.v1";
 
 function cfLoadScenarios() {
@@ -3232,82 +3567,197 @@ function cfSaveScenarios(list) {
   }
 }
 
-function cfRenderScenarios(onLoad) {
-  const container = document.getElementById("cf-scenarios-list");
-  const scenarios = cfLoadScenarios();
-  if (!scenarios.length) {
-    container.innerHTML = '<p class="cashflow-scenarios-empty">No saved scenarios yet — set up a property above and click "Save scenario".</p>';
-    return;
-  }
-  container.innerHTML = "";
-  scenarios.forEach((s) => {
-    const result = computeCashflow(s.inputs);
-    const card = document.createElement("div");
-    card.className = "cashflow-scenario-card";
-    card.innerHTML = `
-      <div>
-        <div class="cashflow-scenario-card__name">${s.name}</div>
-        <div class="cashflow-scenario-card__meta">
-          ${cfMoney(s.inputs.price)} · net ${cfMoney(result.netWeeklyCashflow)}/wk ·
-          ${result.cashOnCashReturnPct == null ? "—" : `${result.cashOnCashReturnPct.toFixed(1)}% cash-on-cash`}
+// Builds one Cashflow calculator instance into `container` — originally a
+// single global tab with fixed cf-* DOM ids (buildCashflowTab/cfReadInputs/
+// cfRenderSummary/cfRenderProjection/cfRenderScenarios), removed 2026-09
+// (user-requested — its content moves inside each Live Listings item's own
+// Cashflow sub-tab, see openLiveListingModal). computeCashflow() itself is
+// unchanged (already a pure function of a plain inputs object); everything
+// DOM-coupled here is scoped to this one `container` instead of the whole
+// document, so more than one instance can exist across different listing
+// modals without colliding — data-cf-* attributes replace the old fixed
+// ids. Scenarios are still saved to the same CF_SCENARIOS_STORAGE_KEY
+// localStorage list, just tagged with `listingId` and filtered to this
+// listing's own (see renderScenarios below) rather than one shared list.
+function buildListingCashflowCalc(container, listing, suggestedWeeklyRent) {
+  container.innerHTML = `
+    <p class="modal-note">
+      Model this listing's likely cashflow and a 30-year equity projection — purchase costs, loan
+      repayments (standard principal &amp; interest amortisation), rental income net of vacancy and
+      management fees, and ongoing costs, against an assumed annual capital growth rate. Change any
+      input below and every output recalculates instantly.
+    </p>
+    <div class="cashflow-layout">
+      <div class="cashflow-inputs">
+        <div class="cashflow-inputs__group">
+          <h4>Purchase &amp; loan</h4>
+          <label>Purchase price ($)<input data-cf="price" type="number" step="1000"></label>
+          <label>Deposit (%)<input data-cf="depositPct" type="number" step="1"></label>
+          <label>Interest rate (% p.a.)<input data-cf="interestRatePct" type="number" step="0.05"></label>
+          <label>Loan term (years)<input data-cf="loanTermYears" type="number" step="1"></label>
+          <label>Stamp duty (%)<input data-cf="stampDutyPct" type="number" step="0.1"></label>
+        </div>
+        <div class="cashflow-inputs__group">
+          <h4>Rental income</h4>
+          <label>Weekly rent ($)<input data-cf="weeklyRent" type="number" step="5"></label>
+          <label>Vacancy allowance (%)<input data-cf="vacancyPct" type="number" step="0.5"></label>
+        </div>
+        <div class="cashflow-inputs__group">
+          <h4>Ongoing costs</h4>
+          <label>Property management (% of rent)<input data-cf="mgmtPct" type="number" step="0.5"></label>
+          <label>Rates + insurance + maintenance ($/yr)<input data-cf="otherExpensesAnnual" type="number" step="100"></label>
+        </div>
+        <div class="cashflow-inputs__group">
+          <h4>Growth assumption</h4>
+          <label>Annual capital growth (%)<input data-cf="growthPct" type="number" step="0.1"></label>
         </div>
       </div>
-      <div class="cashflow-scenario-card__actions">
-        <button type="button" class="btn btn--secondary" data-action="load">Load</button>
-        <button type="button" class="btn btn--ghost" data-action="delete">Delete</button>
+      <div class="cashflow-outputs">
+        <h4>Results</h4>
+        <div class="cashflow-summary" data-cf-summary></div>
+        <div class="cashflow-save">
+          <input type="text" placeholder="Scenario name (e.g. lender, offer)" class="qb-value-input qb-value-input--text" data-cf-scenario-name>
+          <button type="button" class="btn btn--primary" data-cf-save-scenario>Save scenario</button>
+        </div>
       </div>
-    `;
-    card.querySelector('[data-action="load"]').addEventListener("click", () => onLoad(s.inputs));
-    card.querySelector('[data-action="delete"]').addEventListener("click", () => {
-      cfSaveScenarios(cfLoadScenarios().filter((x) => x.id !== s.id));
-      cfRenderScenarios(onLoad);
-    });
-    container.appendChild(card);
-  });
-}
+    </div>
 
-function buildCashflowTab() {
-  const fields = [
-    "cf-price", "cf-deposit-pct", "cf-interest-rate", "cf-loan-term", "cf-stamp-duty-pct",
-    "cf-weekly-rent", "cf-vacancy-pct", "cf-mgmt-pct", "cf-other-expenses", "cf-growth-pct",
+    <div class="cashflow-projection-wrap">
+      <h4>30-year projection</h4>
+      <div class="cashflow-table-scroll">
+        <table class="cashflow-table">
+          <thead>
+            <tr><th>Year</th><th>Property value</th><th>Loan balance</th><th>Equity</th><th>Annual cashflow</th><th>Cumulative cashflow</th></tr>
+          </thead>
+          <tbody data-cf-projection-body></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="cashflow-scenarios">
+      <h4>Saved scenarios (this listing)</h4>
+      <div data-cf-scenarios-list></div>
+    </div>
+  `;
+
+  const FIELD_KEYS = [
+    "price", "depositPct", "interestRatePct", "loanTermYears", "stampDutyPct",
+    "weeklyRent", "vacancyPct", "mgmtPct", "otherExpensesAnnual", "growthPct",
   ];
+  const inputs = {};
+  FIELD_KEYS.forEach((key) => { inputs[key] = container.querySelector(`[data-cf="${key}"]`); });
 
-  function recompute() {
-    const result = computeCashflow(cfReadInputs());
-    cfRenderSummary(result);
-    cfRenderProjection(result);
+  const defaults = {
+    price: listing.price ?? 0, depositPct: 20, interestRatePct: 6.0, loanTermYears: 30, stampDutyPct: 5.0,
+    weeklyRent: suggestedWeeklyRent || 600, vacancyPct: 3, mgmtPct: 7, otherExpensesAnnual: 4500, growthPct: 4.0,
+  };
+  FIELD_KEYS.forEach((key) => { inputs[key].value = defaults[key]; });
+
+  function readInputs() {
+    const result = {};
+    FIELD_KEYS.forEach((key) => { result[key] = Number(inputs[key].value); });
+    return result;
   }
 
-  fields.forEach((id) => {
-    document.getElementById(id).addEventListener("input", debounce(recompute, 200));
+  function renderSummary(result) {
+    const stat = (label, value, cls) => `
+      <div class="cashflow-stat">
+        <span class="cashflow-stat__label">${label}</span>
+        <span class="cashflow-stat__value${cls ? ` ${cls}` : ""}">${value}</span>
+      </div>
+    `;
+    const cashflowCls = result.netWeeklyCashflow >= 0 ? "is-positive" : "is-negative";
+    container.querySelector("[data-cf-summary]").innerHTML = [
+      stat("Loan amount", cfMoney(result.loanAmount)),
+      stat("Upfront cost (deposit + stamp duty)", cfMoney(result.upfrontCosts)),
+      stat("Loan repayment /week", cfMoney(result.weeklyRepayment)),
+      stat("Gross rent /year (after vacancy)", cfMoney(result.grossAnnualRent)),
+      stat("Net cashflow /week", cfMoney(result.netWeeklyCashflow), cashflowCls),
+      stat("Net cashflow /year", cfMoney(result.netAnnualCashflow), cashflowCls),
+      stat("Cash-on-cash return", result.cashOnCashReturnPct == null ? "—" : `${result.cashOnCashReturnPct.toFixed(1)}%`),
+      stat("Equity after 10yr", cfMoney(result.projection[9].equity)),
+      stat("Equity after 30yr", cfMoney(result.projection[29].equity)),
+    ].join("");
+  }
+
+  function renderProjection(result) {
+    container.querySelector("[data-cf-projection-body]").innerHTML = result.projection.map((row) => `
+      <tr>
+        <td>${row.year}</td>
+        <td>${cfMoney(row.propertyValue)}</td>
+        <td>${cfMoney(row.loanBalance)}</td>
+        <td>${cfMoney(row.equity)}</td>
+        <td>${cfMoney(row.annualCashflow)}</td>
+        <td>${cfMoney(row.cumulativeCashflow)}</td>
+      </tr>
+    `).join("");
+  }
+
+  function recompute() {
+    const result = computeCashflow(readInputs());
+    renderSummary(result);
+    renderProjection(result);
+  }
+
+  FIELD_KEYS.forEach((key) => {
+    inputs[key].addEventListener("input", debounce(recompute, 200));
   });
 
-  function loadInputs(inputs) {
-    document.getElementById("cf-price").value = inputs.price;
-    document.getElementById("cf-deposit-pct").value = inputs.depositPct;
-    document.getElementById("cf-interest-rate").value = inputs.interestRatePct;
-    document.getElementById("cf-loan-term").value = inputs.loanTermYears;
-    document.getElementById("cf-stamp-duty-pct").value = inputs.stampDutyPct;
-    document.getElementById("cf-weekly-rent").value = inputs.weeklyRent;
-    document.getElementById("cf-vacancy-pct").value = inputs.vacancyPct;
-    document.getElementById("cf-mgmt-pct").value = inputs.mgmtPct;
-    document.getElementById("cf-other-expenses").value = inputs.otherExpensesAnnual;
-    document.getElementById("cf-growth-pct").value = inputs.growthPct;
+  function loadInputs(savedInputs) {
+    FIELD_KEYS.forEach((key) => { inputs[key].value = savedInputs[key]; });
     recompute();
   }
 
-  document.getElementById("cf-save-scenario").addEventListener("click", () => {
-    const nameInput = document.getElementById("cf-scenario-name");
-    const name = nameInput.value.trim() || `Scenario ${cfLoadScenarios().length + 1}`;
+  function renderScenarios() {
+    const listEl = container.querySelector("[data-cf-scenarios-list]");
+    const scenarios = cfLoadScenarios().filter((s) => s.listingId === listing.listing_id);
+    if (!scenarios.length) {
+      listEl.innerHTML = '<p class="cashflow-scenarios-empty">No saved scenarios yet for this listing — set up the numbers above and click "Save scenario".</p>';
+      return;
+    }
+    listEl.innerHTML = "";
+    scenarios.forEach((s) => {
+      const result = computeCashflow(s.inputs);
+      const card = document.createElement("div");
+      card.className = "cashflow-scenario-card";
+      card.innerHTML = `
+        <div>
+          <div class="cashflow-scenario-card__name">${s.name}</div>
+          <div class="cashflow-scenario-card__meta">
+            ${cfMoney(s.inputs.price)} · net ${cfMoney(result.netWeeklyCashflow)}/wk ·
+            ${result.cashOnCashReturnPct == null ? "—" : `${result.cashOnCashReturnPct.toFixed(1)}% cash-on-cash`}
+          </div>
+        </div>
+        <div class="cashflow-scenario-card__actions">
+          <button type="button" class="btn btn--secondary" data-action="load">Load</button>
+          <button type="button" class="btn btn--ghost" data-action="delete">Delete</button>
+        </div>
+      `;
+      card.querySelector('[data-action="load"]').addEventListener("click", () => loadInputs(s.inputs));
+      card.querySelector('[data-action="delete"]').addEventListener("click", () => {
+        cfSaveScenarios(cfLoadScenarios().filter((x) => x.id !== s.id));
+        renderScenarios();
+      });
+      listEl.appendChild(card);
+    });
+  }
+
+  container.querySelector("[data-cf-save-scenario]").addEventListener("click", () => {
+    const nameInput = container.querySelector("[data-cf-scenario-name]");
     const scenarios = cfLoadScenarios();
-    scenarios.push({ id: `cf-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, name, inputs: cfReadInputs() });
+    const thisListingCount = scenarios.filter((s) => s.listingId === listing.listing_id).length;
+    const name = nameInput.value.trim() || `Scenario ${thisListingCount + 1}`;
+    scenarios.push({
+      id: `cf-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, name,
+      listingId: listing.listing_id, inputs: readInputs(),
+    });
     cfSaveScenarios(scenarios);
     nameInput.value = "";
-    cfRenderScenarios(loadInputs);
+    renderScenarios();
   });
 
   recompute();
-  cfRenderScenarios(loadInputs);
+  renderScenarios();
 }
 
 function setupTabs(tableByTab) {
@@ -3410,7 +3860,6 @@ async function main() {
 
   const subdivisionTable = buildSubdivisionTab(payload);
   const suburbFinderTable = buildSuburbFinderTab(payload);
-  buildCashflowTab();
   buildDefinitionsTab(payload);
   setupTabs({ datatable: table, subdivision: subdivisionTable, suburbfinder: suburbFinderTable });
 }

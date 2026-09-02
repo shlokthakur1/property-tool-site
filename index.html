@@ -23,7 +23,6 @@
     <button class="tabs__btn is-active" data-tab="suburbfinder">Suburb Finder</button>
     <button class="tabs__btn" data-tab="subdivision">Subdivision</button>
     <button class="tabs__btn" data-tab="datatable">Data Table</button>
-    <button class="tabs__btn" data-tab="cashflow">Cashflow</button>
     <button class="tabs__btn" data-tab="definitions">Data Definitions</button>
   </nav>
 
@@ -32,6 +31,7 @@
       <nav class="subtabs">
         <button class="subtabs__btn is-active" data-subtab="explore">Explore suburbs</button>
         <button class="subtabs__btn" data-subtab="shortlist">Shortlist</button>
+        <button class="subtabs__btn" data-subtab="livelistings">Live Listings</button>
       </nav>
 
       <div id="subtab-explore" class="subtab-panel is-active">
@@ -44,6 +44,7 @@
           <button id="suburbfinder-column-panel-toggle" class="btn btn--secondary">Columns</button>
           <button id="suburbfinder-compare-toggle" class="btn btn--secondary" disabled>Compare (0)</button>
           <button id="suburbfinder-add-to-shortlist" class="btn btn--secondary" disabled>Add to Shortlist</button>
+          <button id="suburbfinder-view-live-listings" class="btn btn--secondary" disabled>View Live Listings</button>
           <span id="suburbfinder-row-count" class="toolbar__count"></span>
         </section>
         <div id="suburbfinder-querybuilder" class="querybuilder"></div>
@@ -69,6 +70,7 @@
           <button id="shortlist-remove" class="btn btn--ghost" disabled>Remove from Shortlist</button>
           <button id="shortlist-column-panel-toggle" class="btn btn--secondary">Columns</button>
           <button id="shortlist-compare-toggle" class="btn btn--secondary" disabled>Compare (0)</button>
+          <button id="shortlist-view-live-listings" class="btn btn--secondary" disabled>View Live Listings</button>
           <span id="shortlist-row-count" class="toolbar__count"></span>
         </section>
 
@@ -82,6 +84,29 @@
 
         <div id="shortlist-table"></div>
         <p class="subdivision-note">See the Data Definitions tab for what every column here means.</p>
+      </div>
+
+      <div id="subtab-livelistings" class="subtab-panel">
+        <section class="toolbar toolbar--wrap">
+          <div id="livelistings-active-suburbs" class="livelistings-active-suburbs"></div>
+          <button id="livelistings-column-panel-toggle" class="btn btn--secondary">Columns</button>
+          <span id="livelistings-row-count" class="toolbar__count"></span>
+        </section>
+
+        <div class="table-topbar">
+          <div id="livelistings-pagesize-top"></div>
+          <div class="table-topbar__right">
+            <button id="livelistings-download-xlsx" class="btn btn--secondary">Download Excel</button>
+            <input id="livelistings-search" type="text" placeholder="Search address..." class="toolbar__search" />
+          </div>
+        </div>
+
+        <div id="livelistings-table"></div>
+        <p class="subdivision-note">
+          For-Sale listings in whichever suburbs are currently selected (tick suburbs in Explore
+          suburbs or Shortlist, then "View Live Listings") — click a row for its own Profitability
+          and Cashflow calculators.
+        </p>
       </div>
     </div>
   </section>
@@ -134,71 +159,6 @@
     </div>
   </section>
 
-  <section id="tab-cashflow" class="tab-panel">
-    <div class="pt-shell">
-      <p class="subdivision-note">
-        Model one property's likely cashflow and a 30-year equity projection — purchase costs, loan
-        repayments (standard principal &amp; interest amortisation), rental income net of vacancy and
-        management fees, and ongoing costs, against an assumed annual capital growth rate. All assumptions
-        are the plain inputs below (nothing hidden) — change any of them and every output recalculates
-        instantly. Save a scenario to keep a running list of properties you're comparing.
-      </p>
-
-      <div class="cashflow-layout">
-        <div class="cashflow-inputs">
-          <div class="cashflow-inputs__group">
-            <h4>Purchase &amp; loan</h4>
-            <label>Purchase price ($)<input id="cf-price" type="number" step="1000" value="650000"></label>
-            <label>Deposit (%)<input id="cf-deposit-pct" type="number" step="1" value="20"></label>
-            <label>Interest rate (% p.a.)<input id="cf-interest-rate" type="number" step="0.05" value="6.0"></label>
-            <label>Loan term (years)<input id="cf-loan-term" type="number" step="1" value="30"></label>
-            <label>Stamp duty (%)<input id="cf-stamp-duty-pct" type="number" step="0.1" value="5.0"></label>
-          </div>
-          <div class="cashflow-inputs__group">
-            <h4>Rental income</h4>
-            <label>Weekly rent ($)<input id="cf-weekly-rent" type="number" step="5" value="600"></label>
-            <label>Vacancy allowance (%)<input id="cf-vacancy-pct" type="number" step="0.5" value="3"></label>
-          </div>
-          <div class="cashflow-inputs__group">
-            <h4>Ongoing costs</h4>
-            <label>Property management (% of rent)<input id="cf-mgmt-pct" type="number" step="0.5" value="7"></label>
-            <label>Rates + insurance + maintenance ($/yr)<input id="cf-other-expenses" type="number" step="100" value="4500"></label>
-          </div>
-          <div class="cashflow-inputs__group">
-            <h4>Growth assumption</h4>
-            <label>Annual capital growth (%)<input id="cf-growth-pct" type="number" step="0.1" value="4.0"></label>
-          </div>
-        </div>
-
-        <div class="cashflow-outputs">
-          <h4>Results</h4>
-          <div id="cf-summary" class="cashflow-summary"></div>
-          <div class="cashflow-save">
-            <input id="cf-scenario-name" type="text" placeholder="Scenario name (e.g. suburb or address)" class="qb-value-input qb-value-input--text">
-            <button id="cf-save-scenario" class="btn btn--primary">Save scenario</button>
-          </div>
-        </div>
-      </div>
-
-      <div id="cf-projection-wrap" class="cashflow-projection-wrap">
-        <h4>30-year projection</h4>
-        <div class="cashflow-table-scroll">
-          <table class="cashflow-table">
-            <thead>
-              <tr><th>Year</th><th>Property value</th><th>Loan balance</th><th>Equity</th><th>Annual cashflow</th><th>Cumulative cashflow</th></tr>
-            </thead>
-            <tbody id="cf-projection-body"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="cashflow-scenarios">
-        <h4>Saved scenarios</h4>
-        <div id="cf-scenarios-list"></div>
-      </div>
-    </div>
-  </section>
-
   <section id="tab-definitions" class="tab-panel">
     <div class="pt-shell">
       <div class="table-topbar">
@@ -217,6 +177,16 @@
       </p>
     </div>
   </section>
+
+  <div id="livelisting-modal" class="modal-overlay" hidden>
+    <div class="modal-dialog modal-dialog--wide">
+      <div class="modal-header">
+        <h3 id="livelisting-modal-title"></h3>
+        <button id="livelisting-modal-close" class="btn btn--ghost" aria-label="Close">✕</button>
+      </div>
+      <div id="livelisting-modal-body" class="modal-body"></div>
+    </div>
+  </div>
 
   <div id="subdivision-modal" class="modal-overlay" hidden>
     <div class="modal-dialog">
@@ -287,6 +257,18 @@
     <div id="shortlist-column-panel-groups" class="column-panel__groups"></div>
   </aside>
 
+  <aside id="livelistings-column-panel" class="column-panel" hidden>
+    <div class="column-panel__header">
+      <h3>Columns</h3>
+      <button id="livelistings-column-panel-close" class="btn btn--ghost" aria-label="Close">✕</button>
+    </div>
+    <div class="column-panel__actions">
+      <button id="livelistings-column-panel-all" class="btn btn--ghost">Select all</button>
+      <button id="livelistings-column-panel-none" class="btn btn--ghost">Select none</button>
+    </div>
+    <div id="livelistings-column-panel-groups" class="column-panel__groups"></div>
+  </aside>
+
   <aside id="subdivision-column-panel" class="column-panel" hidden>
     <div class="column-panel__header">
       <h3>Columns</h3>
@@ -301,6 +283,10 @@
 
   <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- jsPDF + jspdf-autotable — used only by the Subdivision tab's "Download
+       feasibility report" (a real .pdf, see buildFeasibilityReportPdf in app.js). -->
+  <script src="https://unpkg.com/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://unpkg.com/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
