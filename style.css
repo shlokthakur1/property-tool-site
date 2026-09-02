@@ -1567,6 +1567,16 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* Suburb Finder → Live Listings — per-listing modal's own action row
+   ("View listing ↗" + "Download report (PDF)", see openLiveListingModal). */
+.livelisting-modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 16px;
+}
+
 .chip {
   display: inline-block;
   padding: 3px 10px;

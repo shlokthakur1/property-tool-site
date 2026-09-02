@@ -1150,19 +1150,20 @@ function buildListingDetailElement(listing, group, onProfitChange) {
 // says so rather than implying otherwise). Height limit / floor space
 // ratio dropped 2026-09 (user-requested, low value, NSW-only) — Council
 // (now backed by a nationwide lookup, see enrich_council.py) kept.
-function buildFeasibilityReportPdf(listing, params, eco, group) {
+// Shared jsPDF report scaffolding — a title/subtitle header plus the
+// heading/note/kvTable/dataTable/bigFigure building blocks every PDF export
+// in this file is assembled from (buildFeasibilityReportPdf below, and
+// buildLiveListingReportPdf's Suburb Finder → Live Listings report).
+// jsPDF + jspdf-autotable are loaded via CDN in index.html, same pattern as
+// Tabulator — `doc.autoTable` is the plugin's own method, attached once
+// jspdf.plugin.autotable.js loads after jspdf itself.
+function createPdfReport(title, subtitle) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 40;
   const contentWidth = pageWidth - margin * 2;
-  const generatedAt = new Date().toLocaleString("en-AU");
-  const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
-  // jsPDF's built-in fonts use WinAnsi encoding, which has no glyph for the
-  // real minus sign (−, U+2212) the on-screen UI uses elsewhere — a plain
-  // hyphen reads identically in print and avoids a missing-glyph box.
-  const sign = (v) => (v >= 0 ? "+" : "-");
   let y = margin;
 
   function ensureSpace(minHeight) {
@@ -1222,16 +1223,67 @@ function buildFeasibilityReportPdf(listing, params, eco, group) {
     y = doc.lastAutoTable.finalY + 10;
   }
 
+  // A large, sign-colored dollar callout (e.g. "Estimated profit") with an
+  // optional muted caption line underneath — shared by both reports' own
+  // profit sections.
+  function bigFigure(valueText, colorRgb, captionText) {
+    ensureSpace(30);
+    doc.setFont(undefined, "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(...colorRgb);
+    doc.text(valueText, margin, y + 14);
+    doc.setTextColor(30, 27, 41);
+    doc.setFont(undefined, "normal");
+    y += 30;
+    if (captionText) {
+      doc.setFontSize(9);
+      doc.setTextColor(136);
+      const lines = doc.splitTextToSize(captionText, contentWidth);
+      doc.text(lines, margin, y);
+      doc.setTextColor(30, 27, 41);
+      y += lines.length * 10 + 6;
+    }
+  }
+
   doc.setFont(undefined, "bold");
   doc.setFontSize(18);
-  doc.text("Subdivision Feasibility Study", margin, y + 6);
+  doc.text(title, margin, y + 6);
   y += 22;
   doc.setFont(undefined, "normal");
   doc.setFontSize(10);
   doc.setTextColor(102);
-  doc.text(`${listing.address}, ${listing.suburb} ${listing.state} ${listing.postcode ?? ""} — generated ${generatedAt}`, margin, y);
+  doc.text(subtitle, margin, y);
   doc.setTextColor(30, 27, 41);
   y += 20;
+
+  // A wrapped bullet-point list (e.g. AI-generated notes) — each item may
+  // wrap to more than one line, so this can't be expressed as a fixed-row
+  // dataTable.
+  function bulletList(items, lineHeight = 11) {
+    doc.setFontSize(9);
+    items.forEach((item) => {
+      const lines = doc.splitTextToSize(`•  ${item}`, contentWidth);
+      ensureSpace(lines.length * lineHeight);
+      doc.text(lines, margin, y);
+      y += lines.length * lineHeight + 2;
+    });
+    y += 4;
+  }
+
+  return { doc, heading, note, kvTable, dataTable, bigFigure, bulletList, ensureSpace, margin, contentWidth };
+}
+
+function buildFeasibilityReportPdf(listing, params, eco, group) {
+  const generatedAt = new Date().toLocaleString("en-AU");
+  const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
+  // jsPDF's built-in fonts use WinAnsi encoding, which has no glyph for the
+  // real minus sign (−, U+2212) the on-screen UI uses elsewhere — a plain
+  // hyphen reads identically in print and avoids a missing-glyph box.
+  const sign = (v) => (v >= 0 ? "+" : "-");
+  const { doc, heading, note, kvTable, dataTable, bigFigure, bulletList } = createPdfReport(
+    "Subdivision Feasibility Study",
+    `${listing.address}, ${listing.suburb} ${listing.state} ${listing.postcode ?? ""} — generated ${generatedAt}`,
+  );
 
   heading("Overview");
   kvTable([
@@ -1256,14 +1308,7 @@ function buildFeasibilityReportPdf(listing, params, eco, group) {
 
   if (listing.ai_summary && listing.ai_summary.length) {
     heading("AI subdivision notes");
-    doc.setFontSize(9);
-    listing.ai_summary.forEach((point) => {
-      const lines = doc.splitTextToSize(`•  ${point}`, contentWidth);
-      ensureSpace(lines.length * 11);
-      doc.text(lines, margin, y);
-      y += lines.length * 11 + 2;
-    });
-    y += 4;
+    bulletList(listing.ai_summary);
     note("Generated from this listing's own description — may contain errors, not a substitute for reading the full ad.");
   }
 
@@ -1299,21 +1344,11 @@ function buildFeasibilityReportPdf(listing, params, eco, group) {
 
   heading("Estimated profit");
   const marginPct = eco.totalCost ? Math.round((eco.profit / eco.totalCost) * 1000) / 10 : null;
-  doc.setFont(undefined, "bold");
-  doc.setFontSize(16);
-  if (eco.profit >= 0) doc.setTextColor(26, 127, 55);
-  else doc.setTextColor(192, 57, 43);
-  doc.text(`${sign(eco.profit)}${formatMoney(Math.abs(eco.profit))}`, margin, y + 14);
-  doc.setTextColor(30, 27, 41);
-  doc.setFont(undefined, "normal");
-  y += 30;
-  if (marginPct != null) {
-    doc.setFontSize(9);
-    doc.setTextColor(136);
-    doc.text(`(${marginPct}% margin on total cost)`, margin, y);
-    doc.setTextColor(30, 27, 41);
-    y += 16;
-  }
+  bigFigure(
+    `${sign(eco.profit)}${formatMoney(Math.abs(eco.profit))}`,
+    eco.profit >= 0 ? [26, 127, 55] : [192, 57, 43],
+    marginPct != null ? `(${marginPct}% margin on total cost)` : null,
+  );
 
   heading("Comparables — smaller lot sales");
   note(`Sold vacant land in ${listing.suburb} used to estimate resale value per new lot — ${compMethodLabel(listing.comp_method) ?? `sized within 30% of the ${Math.round(listing.resulting_lot_m2)}m² resulting lot`}, ${listing.comp_count} comparable${listing.comp_count === 1 ? "" : "s"}, ${confidenceLabel(listing.confidence)} confidence.`);
@@ -1356,6 +1391,113 @@ function buildFeasibilityReportPdf(listing, params, eco, group) {
 function downloadFeasibilityReport(listing, params, eco, group) {
   const doc = buildFeasibilityReportPdf(listing, params, eco, group);
   const filename = `feasibility-report-${String(listing.listing_id || listing.address || "listing").replace(/[^a-z0-9]+/gi, "-")}.pdf`;
+  doc.save(filename);
+}
+
+// Standalone PDF export for one Suburb Finder → Live Listings item (2026-09,
+// user-requested, "similar to the subdivision tab") — property details plus
+// whatever's CURRENTLY in that listing's Profitability and Cashflow
+// sub-tabs (live edits, not raw defaults), same contract as
+// buildFeasibilityReportPdf above (which this shares createPdfReport with).
+function buildLiveListingReportPdf(listing, profitability, cashflowInputs, cashflowResult) {
+  const generatedAt = new Date().toLocaleString("en-AU");
+  const m2 = (v) => (v != null ? `${Math.round(v).toLocaleString()} m²` : "—");
+  const sign = (v) => (v >= 0 ? "+" : "-");
+  const { doc, heading, note, kvTable, dataTable, bigFigure } = createPdfReport(
+    "Property Report",
+    `${listing.address}, ${listing.suburb} ${listing.state} ${listing.postcode ?? ""} — generated ${generatedAt}`,
+  );
+
+  heading("Overview");
+  kvTable([
+    ["Price", formatMoney(listing.price)],
+    ["Property type", listing.property_type ?? "—"],
+    ["Land size", m2(listing.land_size_m2)],
+    ["Zone", listing.zone ?? "—"],
+    ["Council", listing.council ?? "—"],
+    ["Status", listing.status ?? "—"],
+  ]);
+  if (listing.url) note(`Listing: ${listing.url}`);
+
+  heading("Profitability — acquisition");
+  dataTable(["Item", "Amount"], [
+    ["Purchase price", formatMoney(profitability.purchasePrice)],
+    ["Stamp duty", formatMoney(profitability.stampDuty)],
+    ["Conveyancing costs (buy side)", formatMoney(profitability.conveyancingBuyCost)],
+    ["LMI — Lenders Mortgage Insurance", formatMoney(profitability.lmiCost)],
+    ["Building & pest inspection", formatMoney(profitability.buildingPestCost)],
+    ["Total acquisition cost", formatMoney(profitability.totalAcquisitionCost)],
+  ], {
+    columnStyles: { 1: { halign: "right" } },
+    didParseCell: (data) => { if (data.section === "body" && data.row.index === 5) data.cell.styles.fontStyle = "bold"; },
+  });
+
+  heading("Profitability — disposal");
+  dataTable(["Item", "Amount"], [
+    ["Estimated selling price", formatMoney(profitability.estSellingPrice)],
+    ["Agent commission", `-${formatMoney(profitability.agentCommission)}`],
+    ["Conveyancer costs (sell side)", `-${formatMoney(profitability.conveyancingSellCost)}`],
+    ["Net sale proceeds", formatMoney(profitability.netSaleProceeds)],
+  ], {
+    columnStyles: { 1: { halign: "right" } },
+    didParseCell: (data) => { if (data.section === "body" && data.row.index === 3) data.cell.styles.fontStyle = "bold"; },
+  });
+
+  heading("Estimated profit");
+  bigFigure(
+    `${sign(profitability.profit)}${formatMoney(Math.abs(profitability.profit))}`,
+    profitability.profit >= 0 ? [26, 127, 55] : [192, 57, 43],
+    profitability.targetProfit
+      ? `Target profit of ${formatMoney(profitability.targetProfit)} needs a sale price of ${profitability.requiredSalePrice != null ? formatMoney(profitability.requiredSalePrice) : "—"}.`
+      : null,
+  );
+
+  heading("Cashflow — assumptions");
+  kvTable([
+    ["Purchase price", formatMoney(cashflowInputs.price)],
+    ["Deposit", `${cashflowInputs.depositPct}%`],
+    ["Interest rate", `${cashflowInputs.interestRatePct}% p.a.`],
+    ["Loan term", `${cashflowInputs.loanTermYears} years`],
+    ["Stamp duty", `${cashflowInputs.stampDutyPct}%`],
+    ["Weekly rent", formatMoney(cashflowInputs.weeklyRent)],
+    ["Vacancy allowance", `${cashflowInputs.vacancyPct}%`],
+    ["Property management", `${cashflowInputs.mgmtPct}% of rent`],
+    ["Rates + insurance + maintenance", `${formatMoney(cashflowInputs.otherExpensesAnnual)}/yr`],
+    ["Annual capital growth", `${cashflowInputs.growthPct}%`],
+  ]);
+
+  heading("Cashflow — results");
+  kvTable([
+    ["Loan amount", formatMoney(cashflowResult.loanAmount)],
+    ["Upfront cost (deposit + stamp duty)", formatMoney(cashflowResult.upfrontCosts)],
+    ["Loan repayment /week", formatMoney(cashflowResult.weeklyRepayment)],
+    ["Gross rent /year (after vacancy)", formatMoney(cashflowResult.grossAnnualRent)],
+    ["Net cashflow /week", formatMoney(cashflowResult.netWeeklyCashflow)],
+    ["Net cashflow /year", formatMoney(cashflowResult.netAnnualCashflow)],
+    ["Cash-on-cash return", cashflowResult.cashOnCashReturnPct == null ? "—" : `${cashflowResult.cashOnCashReturnPct.toFixed(1)}%`],
+    ["Equity after 10yr", formatMoney(cashflowResult.projection[9].equity)],
+    ["Equity after 30yr", formatMoney(cashflowResult.projection[29].equity)],
+  ]);
+
+  heading("Cashflow — 30-year projection");
+  dataTable(
+    ["Year", "Property value", "Loan balance", "Equity", "Annual cashflow", "Cumulative cashflow"],
+    cashflowResult.projection.map((row) => [
+      String(row.year), formatMoney(row.propertyValue), formatMoney(row.loanBalance),
+      formatMoney(row.equity), formatMoney(row.annualCashflow), formatMoney(row.cumulativeCashflow),
+    ]),
+    { columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } } },
+  );
+
+  heading("Notes");
+  note("This is an automated estimate for research purposes only, built from editable purchase/sale cost and loan/rent assumptions — not a substitute for professional financial, legal, or tax advice before purchasing.");
+
+  return doc;
+}
+
+function downloadLiveListingReport(listing, profitability, cashflowInputs, cashflowResult) {
+  const doc = buildLiveListingReportPdf(listing, profitability, cashflowInputs, cashflowResult);
+  const filename = `property-report-${String(listing.listing_id || listing.address || "listing").replace(/[^a-z0-9]+/gi, "-")}.pdf`;
   doc.save(filename);
 }
 
@@ -2964,7 +3106,10 @@ function openLiveListingModal(listing, suburbsByKey) {
       <div><span>Zone</span><span>${listing.zone ?? "—"}</span></div>
       <div><span>Council</span><span>${listing.council ?? "—"}</span></div>
     </div>
-    ${listing.url ? `<p><a class="listing-card__view-link" href="${listing.url}" target="_blank" rel="noopener">View listing ↗</a></p>` : ""}
+    <div class="livelisting-modal__actions">
+      ${listing.url ? `<a class="listing-card__view-link" href="${listing.url}" target="_blank" rel="noopener">View listing ↗</a>` : "<span></span>"}
+      <button type="button" class="btn btn--secondary" data-livelisting-download-report>Download report (PDF)</button>
+    </div>
     <nav class="subtabs">
       <button type="button" class="subtabs__btn is-active" data-livelisting-subtab="profitability">Profitability</button>
       <button type="button" class="subtabs__btn" data-livelisting-subtab="cashflow">Cashflow</button>
@@ -2988,7 +3133,22 @@ function openLiveListingModal(listing, suburbsByKey) {
   const suggestedWeeklyRent = suburbRow
     ? (listing.property_type === "Unit" ? suburbRow.median_rent_weekly_unit : suburbRow.median_rent_weekly_house)
     : null;
-  buildListingCashflowCalc(body.querySelector('[data-livelisting-panel="cashflow"]'), listing, suggestedWeeklyRent);
+  const cashflowCalc = buildListingCashflowCalc(body.querySelector('[data-livelisting-panel="cashflow"]'), listing, suggestedWeeklyRent);
+
+  // Exports listing details plus whatever's CURRENTLY in the Profitability
+  // and Cashflow sub-tabs (live edits, not the raw defaults) — same "live
+  // state, not defaults" contract as the Subdivision tab's own feasibility
+  // report (see downloadFeasibilityReport). Profitability params come
+  // straight off profitabilityListingOverrides (no DOM read needed, that
+  // Map is the source of truth); Cashflow's own inputs live only in its own
+  // <input> elements, so buildListingCashflowCalc hands back a getInputs()
+  // accessor to read them fresh at click time.
+  body.querySelector("[data-livelisting-download-report]").addEventListener("click", () => {
+    const profitability = computeProfitability(getProfitabilityParams(listing));
+    const cashflowInputs = cashflowCalc.getInputs();
+    const cashflowResult = computeCashflow(cashflowInputs);
+    downloadLiveListingReport(listing, profitability, cashflowInputs, cashflowResult);
+  });
 
   overlay.hidden = false;
 }
@@ -3219,7 +3379,7 @@ function buildSuburbFinderTab(payload) {
   const dataTableColumnsCfg = mergeIdentityColumns(payload.columns);
   const liveListingsTable = new Tabulator("#livelistings-table", {
     data: payload.rows,
-    columns: [...buildGroupedColumns(dataTableColumnsCfg), buildLiveListingActionColumn()],
+    columns: [buildLiveListingActionColumn(), ...buildGroupedColumns(dataTableColumnsCfg)],
     layout: "fitDataFill",
     columnDefaults: { headerWordWrap: true, minWidth: 110 },
     height: "calc(100vh - 300px)",
@@ -3758,6 +3918,11 @@ function buildListingCashflowCalc(container, listing, suggestedWeeklyRent) {
 
   recompute();
   renderScenarios();
+
+  // Handed back so a caller (see openLiveListingModal's PDF export) can
+  // read this instance's CURRENT inputs at click time — they live only in
+  // this container's own <input> elements, not in any shared/global state.
+  return { getInputs: readInputs };
 }
 
 function setupTabs(tableByTab) {
